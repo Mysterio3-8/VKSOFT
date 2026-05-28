@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VK Post Bot</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo"><div class="logo-icon">VK</div><h1>VK Post Bot</h1></div>
+    <div class="profile-switcher" id="profileSwitcher">
+      <div class="profile-dot" id="profileDot"></div>
+      <span class="profile-name" id="profileName">Загрузка...</span>
+      <span class="profile-chevron">v</span>
+    </div>
+  </div>
+  <nav class="nav-menu">
+    <button class="nav-item active" data-tab="dashboard"><span class="nav-icon">D</span><span>Дашборд</span></button>
+    <button class="nav-item" data-tab="channels"><span class="nav-icon">C</span><span>Каналы</span></button>
+    <button class="nav-item" data-tab="settings"><span class="nav-icon">S</span><span>Настройки</span></button>
+    <button class="nav-item" data-tab="media"><span class="nav-icon">M</span><span>Медиа</span></button>
+    <button class="nav-item" data-tab="growth"><span class="nav-icon">R</span><span>Рост</span></button>
+    <button class="nav-item" data-tab="monitor"><span class="nav-icon">N</span><span>Новости</span></button>
+    <button class="nav-item" data-tab="library"><span class="nav-icon">L</span><span>Библиотека</span></button>
+    <button class="nav-item" data-tab="logs"><span class="nav-icon">G</span><span>Логи</span></button>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="bot-status"><div class="status-dot" id="statusDot"></div><span id="statusText">Готов</span></div>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <span class="topbar-title" id="topbarTitle">Дашборд</span>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost btn-sm" onclick="refreshAll()">Обновить</button>
+    </div>
+  </div>
+
+  <div class="content-area">
+    <section class="tab-content active" id="dashboard">
+      <div class="health-bar">
+        <span class="health-item" id="healthDownload">Загрузка: <b>-</b></span><span class="health-sep">/</span>
+        <span class="health-item" id="healthPublish">Публикация: <b>-</b></span><span class="health-sep">/</span>
+        <span class="health-item" id="healthMonitor">Новости: <b>-</b></span><span class="health-sep">/</span>
+        <span class="health-item">Последний отложенный: <b id="healthLastSched">-</b></span>
+      </div>
+
+      <div class="grid-4">
+        <div class="stat-card"><div class="stat-label">В очереди</div><div class="stat-value" id="statPending">0</div><div class="stat-sub">готовых постов</div></div>
+        <div class="stat-card"><div class="stat-label">Опубликовано</div><div class="stat-value" id="statPublished">0</div><div class="stat-sub">за все время</div></div>
+        <div class="stat-card stat-card-today"><div class="stat-label">Сегодня</div><div class="stat-value" id="statToday">0</div><div class="stat-sub">публикаций</div></div>
+        <div class="stat-card stat-card-errors" id="statErrorsCard"><div class="stat-label">Ошибок сегодня</div><div class="stat-value" id="statErrors">0</div><div class="stat-sub">смотри логи</div></div>
+      </div>
+
+      <div class="grid-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-header"><div class="card-title"><span class="icon">VK</span>Основные действия</div></div>
+          <div class="form-section">
+            <div class="form-row">
+              <button class="btn btn-secondary btn-lg" onclick="post('/download/start_all', {}, 'Загрузка запущена')">Скачать из источников</button>
+              <button class="btn btn-primary btn-lg" onclick="post('/publish/start', {}, 'Публикация запущена')">Опубликовать очередь</button>
+            </div>
+            <div class="form-row">
+              <button class="btn btn-ghost" onclick="post('/download/pause', {}, 'Загрузка остановлена')">Стоп загрузки</button>
+              <button class="btn btn-ghost" onclick="post('/publish/pause', {}, 'Публикация остановлена')">Стоп публикации</button>
+            </div>
+            <div>
+              <div class="form-label">Прогресс загрузки</div>
+              <div class="progress-wrap"><div class="progress-bar" id="downloadProgressBar"></div></div>
+              <div class="form-hint" id="downloadProgressText">-</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><div class="card-title"><span class="icon">Q</span>Ближайшие посты</div><button class="btn btn-ghost btn-sm" onclick="loadPending()">Обновить</button></div>
+          <div id="pendingList"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">30</span>Активность за месяц</div></div>
+        <div class="activity-chart" id="activityChart"></div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="channels">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><div class="card-title"><span class="icon">C</span>Твои каналы</div></div>
+          <div id="profilesList" class="form-section"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title"><span class="icon">+</span>Создать канал</div></div>
+          <div class="form-section">
+            <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="profileNewName" placeholder="Например: Новости Владивостока"></div>
+            <div class="form-group"><label class="form-label">Цвет</label><input class="form-input" id="profileNewColor" type="color" value="#7c3aed"></div>
+            <button class="btn btn-primary" onclick="createProfile()">Создать</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-header"><div class="card-title"><span class="icon">VK</span>VK-источники для постов</div></div>
+          <div id="sourcesList" class="form-section"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title"><span class="icon">+</span>Добавить источник</div></div>
+          <div class="form-section">
+            <div class="form-group"><label class="form-label">Название</label><input class="form-input" id="sourceName" placeholder="Новости, город, спорт"></div>
+            <div class="form-group"><label class="form-label">Community ID</label><input class="form-input" id="sourceCommunityId" placeholder="33440105"></div>
+            <button class="btn btn-primary" onclick="addSource()">Добавить</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="settings">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">S</span>Настройки канала</div>
+          <div style="display:flex;gap:8px"><button class="btn btn-secondary btn-sm" onclick="validateVk()">Проверить VK</button><button class="btn btn-primary btn-sm" onclick="saveSettings()">Сохранить</button></div>
+        </div>
+        <div class="settings-nav">
+          <button class="settings-tab active" data-settings="vk">VK</button>
+          <button class="settings-tab" data-settings="download">Загрузка</button>
+          <button class="settings-tab" data-settings="publish">Публикация</button>
+          <button class="settings-tab" data-settings="processing">Обработка</button>
+          <button class="settings-tab" data-settings="filters">Фильтры</button>
+          <button class="settings-tab" data-settings="ai">Ollama</button>
+        </div>
+
+        <div class="settings-panel active" id="settings-vk">
+          <div class="form-section">
+            <div class="form-row"><div class="form-group"><label class="form-label">User token</label><input class="form-input" id="userToken" type="password"></div><div class="form-group"><label class="form-label">Group token</label><input class="form-input" id="groupToken" type="password"></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">Group ID</label><input class="form-input" id="groupId"></div><div class="form-group"><label class="form-label">API version</label><input class="form-input" id="apiVersion"></div></div>
+          </div>
+        </div>
+
+        <div class="settings-panel" id="settings-download">
+          <div class="form-section">
+            <div class="form-row-3"><div class="form-group"><label class="form-label">Постов скачать</label><input class="form-input" id="postsToDownload" type="number" min="1"></div><div class="form-group"><label class="form-label">Пауза мин, сек</label><input class="form-input" id="downloadDelayMin" type="number" min="0"></div><div class="form-group"><label class="form-label">Пауза макс, сек</label><input class="form-input" id="downloadDelayMax" type="number" min="0"></div></div>
+            <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Проверять дубли</span><span class="toggle-desc">Не тянуть одинаковые посты повторно</span></span><span class="toggle"><input id="checkDuplicates" type="checkbox"><span class="toggle-slider"></span></span></label>
+          </div>
+        </div>
+
+        <div class="settings-panel" id="settings-publish">
+          <div class="form-section">
+            <div class="form-row-3"><div class="form-group"><label class="form-label">Постов за запуск</label><input class="form-input" id="postsToPublish" type="number" min="1"></div><div class="form-group"><label class="form-label">Пауза мин, сек</label><input class="form-input" id="publishDelayMin" type="number" min="0"></div><div class="form-group"><label class="form-label">Пауза макс, сек</label><input class="form-input" id="publishDelayMax" type="number" min="0"></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">Публиковать с часа</label><input class="form-input" id="publishStart" type="number" min="0" max="23"></div><div class="form-group"><label class="form-label">Публиковать до часа</label><input class="form-input" id="publishEnd" type="number" min="0" max="23"></div></div>
+            <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Отложенные посты</span><span class="toggle-desc">Расставлять посты по времени</span></span><span class="toggle"><input id="postponedEnabled" type="checkbox"><span class="toggle-slider"></span></span></label>
+            <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Рабочие часы</span><span class="toggle-desc">Публиковать только в выбранном окне</span></span><span class="toggle"><input id="publishHoursEnabled" type="checkbox"><span class="toggle-slider"></span></span></label>
+            <div class="form-row"><div class="form-group"><label class="form-label">Последний отложенный</label><input class="form-input" id="lastScheduledInput" type="datetime-local"></div><div class="form-group"><label class="form-label">&nbsp;</label><button class="btn btn-secondary" onclick="saveLastScheduled()">Сохранить время</button></div></div>
+            <button class="btn btn-ghost" onclick="post('/publish/last_scheduled_from_vk', {}, 'Время взято из VK')">Подтянуть последний отложенный из VK</button>
+          </div>
+        </div>
+
+        <div class="settings-panel" id="settings-processing">
+          <div class="form-section">
+            <div class="form-group"><label class="form-label">Хештеги через пробел</label><input class="form-input" id="hashtags" placeholder="#новости #город"></div>
+            <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Только посты с фото</span><span class="toggle-desc">Без фото посты пропускаются</span></span><span class="toggle"><input id="photoOnly" type="checkbox"><span class="toggle-slider"></span></span></label>
+            <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Разрешить видео</span><span class="toggle-desc">Можно публиковать видео-вложения</span></span><span class="toggle"><input id="allowVideo" type="checkbox"><span class="toggle-slider"></span></span></label>
+          </div>
+        </div>
+
+        <div class="settings-panel" id="settings-filters">
+          <div class="form-section">
+            <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Автофильтры</span><span class="toggle-desc">Отсекать мусорные посты по правилам</span></span><span class="toggle"><input id="filtersEnabled" type="checkbox"><span class="toggle-slider"></span></span></label>
+            <div class="form-group"><label class="form-label">Стоп-слова через запятую</label><textarea class="form-input" id="blockKeywords"></textarea></div>
+            <div class="form-group"><label class="form-label">Минимальная длина текста</label><input class="form-input" id="minContentLength" type="number" min="0"></div>
+          </div>
+        </div>
+
+        <div class="settings-panel" id="settings-ai">
+          <div class="form-section">
+            <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Ollama</span><span class="toggle-desc">Переписывание и улучшение текста локальной моделью</span></span><span class="toggle"><input id="ollamaEnabled" type="checkbox"><span class="toggle-slider"></span></span></label>
+            <div class="form-row"><div class="form-group"><label class="form-label">URL</label><input class="form-input" id="ollamaUrl"></div><div class="form-group"><label class="form-label">Model</label><input class="form-input" id="ollamaModel"></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">Слов минимум</label><input class="form-input" id="ollamaWordsMin" type="number"></div><div class="form-group"><label class="form-label">Слов максимум</label><input class="form-input" id="ollamaWordsMax" type="number"></div></div>
+            <button class="btn btn-secondary" onclick="testOllama()">Проверить Ollama</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="media">
+      <div class="grid-3" id="mediaCards"></div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">M</span>Настройки медиа</div><button class="btn btn-primary btn-sm" onclick="saveMediaSettings()">Сохранить</button></div>
+        <div class="grid-3">
+          <div class="form-section"><div class="section-title">Фото</div><label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Включить фото</span></span><span class="toggle"><input id="photosEnabled" type="checkbox"><span class="toggle-slider"></span></span></label><div class="form-group"><label class="form-label">Фото за запуск</label><input class="form-input" id="photosPerRun" type="number"></div></div>
+          <div class="form-section"><div class="section-title">Видео</div><label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Пост на стену</span></span><span class="toggle"><input id="videosWallPost" type="checkbox"><span class="toggle-slider"></span></span></label><div class="form-group"><label class="form-label">Видео за запуск</label><input class="form-input" id="videosPerRun" type="number"></div><div class="form-group"><label class="form-label">Макс MB</label><input class="form-input" id="videosMaxMb" type="number"></div></div>
+          <div class="form-section"><div class="section-title">Клипы</div><label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Пост на стену</span></span><span class="toggle"><input id="clipsWallPost" type="checkbox"><span class="toggle-slider"></span></span></label><div class="form-group"><label class="form-label">Клипов за запуск</label><input class="form-input" id="clipsPerRun" type="number"></div><div class="form-group"><label class="form-label">Макс секунд</label><input class="form-input" id="clipsMaxSec" type="number"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="growth">
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">R</span>Рост канала</div><button class="btn btn-secondary btn-sm" onclick="post('/growth/subscribers/update', {}, 'Статистика обновлена')">Обновить</button></div><div id="growthStats" class="form-section"></div></div>
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">I</span>Идея для усиления</div></div><p class="form-hint" style="line-height:1.7">Я бы добавил рейтинг постов после публикации: тема, формат, длина, время, просмотры, лайки и рост подписчиков. Так программа сможет не просто постить, а постепенно понимать, какие новости реально двигают канал.</p><div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn btn-secondary" onclick="post('/growth/tracker/check_now', {}, 'Трекинг обновлен')">Проверить статистику</button><button class="btn btn-ghost" onclick="post('/growth/check_suspicious', {}, 'Проверка запущена')">Проверить подозрительное</button></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="icon">F</span>Поиск VK-источников</div></div>
+        <div class="form-row"><input class="form-input" id="sourceSearchQuery" placeholder="новости владивосток"><button class="btn btn-secondary" onclick="searchSources()">Найти</button></div>
+        <div id="sourceSearchResults" style="margin-top:14px"></div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="monitor">
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">N</span>Мониторинг новостей</div><div style="display:flex;gap:8px"><button class="btn btn-primary btn-sm" onclick="post('/monitor/start', {}, 'Мониторинг запущен')">Старт</button><button class="btn btn-secondary btn-sm" onclick="post('/monitor/stop', {}, 'Мониторинг остановлен')">Стоп</button></div></div><div id="monitorStatus"></div></div>
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">S</span>Настройки мониторинга</div><button class="btn btn-primary btn-sm" onclick="saveMonitorSettings()">Сохранить</button></div><div class="form-section"><div class="form-row"><div class="form-group"><label class="form-label">Интервал, мин</label><input class="form-input" id="monInterval" type="number"></div><div class="form-group"><label class="form-label">Макс за цикл</label><input class="form-input" id="monMaxCycle" type="number"></div></div><div class="form-row"><div class="form-group"><label class="form-label">Дней догонять</label><input class="form-input" id="monCatchDays" type="number"></div><div class="form-group"><label class="form-label">Мин просмотров</label><input class="form-input" id="monMinViews" type="number"></div></div></div></div>
+      </div>
+      <div class="grid-2" style="margin-top:16px">
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">+</span>Источники мониторинга</div></div><div class="form-section"><div class="form-row"><input class="form-input" id="monSourceName" placeholder="Название"><input class="form-input" id="monSourceId" placeholder="Community ID"></div><button class="btn btn-secondary" onclick="addMonitorSource()">Добавить</button><div id="monitorSources"></div></div></div>
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">G</span>Лог новостей</div></div><div class="log-list" id="monitorLogList"></div></div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="library">
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">L</span>Библиотека контента</div><button class="btn btn-secondary btn-sm" onclick="loadLibrary()">Обновить</button></div><div id="libraryBlock"></div></div>
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">+</span>Добавить заготовку</div></div><div class="form-section"><textarea class="form-input" id="libraryEntryText" placeholder="Текст заготовки"></textarea><button class="btn btn-primary" onclick="addLibraryEntry()">Добавить</button><button class="btn btn-danger" onclick="post('/library/reset', {}, 'Библиотека сброшена')">Сбросить библиотеку</button></div></div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="logs">
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">G</span>Логи</div><button class="btn btn-ghost btn-sm" onclick="clearLogs()">Очистить</button></div><div class="log-list" id="logsList"></div></div>
+        <div class="card"><div class="card-header"><div class="card-title"><span class="icon">X</span>Очистка очередей</div></div><div class="form-section"><button class="btn btn-danger" onclick="post('/cleanup/posts', {}, 'Очередь постов очищена')">Очистить посты</button><button class="btn btn-danger" onclick="post('/cleanup/all', {}, 'Очереди очищены')">Очистить все очереди</button></div></div>
+      </div>
+    </section>
+  </div>
+</main>
+<script src="script.js"></script>
+</body>
+</html>
