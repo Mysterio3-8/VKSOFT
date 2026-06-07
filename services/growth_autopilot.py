@@ -754,12 +754,14 @@ def build_algorithmic_recommendations() -> Dict:
     current_posts_per_day = int(current_cycle.get('posts_per_day') or current.get('publishing_settings', {}).get('posts_to_publish', 12))
     avg_views = int(summary.get('avg_views', 0) or 0)
     avg_likes = int(summary.get('avg_likes', 0) or 0)
-    recommended_hours = summary.get('recommended_hours') or current.get('peak_hours', {}).get('hours', [8, 10, 13, 17, 19, 21])
+    # Берём часы только из реально обученного трекера.
+    # peak_hours из профиля — устаревшие, не используем как fallback.
+    recommended_hours = summary.get('recommended_hours') or []
     hour_heatmap = summary.get('hour_heatmap', [])
 
     if checked < 5:
         recommended_posts_per_day = current_posts_per_day
-        reason = 'Need at least 5 checked posts; keeping current tempo'
+        reason = 'Накапливаю данные (нужно минимум 5 проверенных постов)'
     elif avg_views <= 0:
         recommended_posts_per_day = max(4, current_posts_per_day - 2)
         reason = 'Views are empty; reduce tempo until tracker has better data'

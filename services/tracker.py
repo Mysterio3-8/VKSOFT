@@ -110,7 +110,9 @@ def get_summary() -> dict:
             'avg_likes': 0,
             'top': [],
             'hour_heatmap': heatmap,
-            'recommended_hours': app_state.profile.get('peak_hours', {}).get('hours', []),
+            # Нет данных → не подставляем peak_hours из профиля (они устаревшие).
+            # Алгоритм сам выберет равномерный fallback.
+            'recommended_hours': [],
         }
     avg_views = round(sum(p['views'] for p in checked) / len(checked))
     avg_likes = round(sum(p['likes'] for p in checked) / len(checked))

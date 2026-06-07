@@ -1048,7 +1048,7 @@ async function gaAnalyze() {
   gaLastRecommendationPatch = rec.patch || null;
   $('gaRecommendationBlock').innerHTML = `
     <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Постов в день</span><b>${esc(rec.posts_per_day || '-')}</b></div>
-    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Лучшие часы</span><b>${esc((rec.hours || []).join(', '))}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"><span>Лучшие часы</span><b>${esc((rec.hours && rec.hours.length ? rec.hours.join(', ') : 'ещё нет данных'))}</b></div>
     <div class="form-hint">${esc(rec.reason || '')}</div>
     ${gaLastRecommendationPatch ? `<button class="btn btn-secondary" onclick="gaApplyRecommendation()">Применить рекомендации</button>` : ''}
   `;
