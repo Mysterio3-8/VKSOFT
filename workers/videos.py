@@ -323,6 +323,18 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                     meta_file.unlink(missing_ok=True)
                     continue
 
+                # Антиплагиат: кроп, вырез фрагмента, лого, метаданные через ffmpeg
+                try:
+                    from services.video_transform import transform_from_profile
+                    if transform_from_profile(
+                        video_path, profile,
+                        title=meta.get('title', ''),
+                        is_clip=is_clips_mode,
+                    ):
+                        app_state.add_log(f'{label}: антиплагиат применён к {video_path.name}', 'info')
+                except Exception as e:
+                    app_state.add_log(f'{label}: обработка видео {e}', 'warning')
+
                 vid_owner, vid_id = _upload_video(
                     vk_user, gid_num, video_path,
                     title=meta.get('title', 'Видео'),

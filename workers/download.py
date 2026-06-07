@@ -356,6 +356,49 @@ def download_then_publish_worker():
         if not app_state.is_downloading and not app_state.is_publishing:
             app_state.download_progress['phase'] = 'idle'
 
+    # Видео и клипы — отдельным этапом после фото (если включены в профиле)
+    try:
+        run_media_autopilot()
+    except Exception as e:
+        app_state.add_log(f'Автопилот медиа (видео/клипы): {e}', 'error')
+
+
+def run_media_autopilot():
+    """Скачать + обработать + опубликовать видео и клипы по настройкам профиля.
+
+    Каждый тип включается отдельным флагом profile['videos_settings']['autopilot']
+    и profile['clips_settings']['autopilot']. Антиплагиат/лого применяются внутри
+    publish_videos_worker через services.video_transform.
+    """
+    profile = app_state.profile
+    vid_cfg = profile.get('videos_settings', {})
+    clip_cfg = profile.get('clips_settings', {})
+
+    if vid_cfg.get('autopilot', False):
+        from workers.videos import download_videos_worker, publish_videos_worker
+        app_state.add_log('Автопилот: этап видео', 'info')
+        app_state.is_downloading_videos = True
+        download_videos_worker()
+        pending = len(list(app_state.videos_queue_dir.glob('*.json')))
+        if pending > 0:
+            app_state.is_publishing_videos = True
+            publish_videos_worker(int(vid_cfg.get('videos_per_run', 10)), is_clips_mode=False)
+        else:
+            app_state.add_log('Автопилот видео: очередь пуста', 'info')
+
+    if clip_cfg.get('autopilot', False):
+        from workers.clips import download_clips_worker
+        from workers.videos import publish_videos_worker
+        app_state.add_log('Автопилот: этап клипов', 'info')
+        app_state.is_downloading_clips = True
+        download_clips_worker()
+        pending = len(list(app_state.clips_queue_dir.glob('*.json')))
+        if pending > 0:
+            app_state.is_publishing_clips = True
+            publish_videos_worker(int(clip_cfg.get('clips_per_run', 10)), is_clips_mode=True)
+        else:
+            app_state.add_log('Автопилот клипов: очередь пуста', 'info')
+
 
 def random_delay(min_s: float, max_s: float):
     time.sleep(random.uniform(min_s, max_s))

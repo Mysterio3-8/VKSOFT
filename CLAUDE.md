@@ -428,6 +428,32 @@ def vk_call_safe(method: str, params: dict, max_retries=3):
 
 ---
 
+## Обработка видео/клипов (антиплагиат через ffmpeg)
+
+**Модуль:** `services/video_transform.py`. Требует **ffmpeg + ffprobe в PATH**.
+
+Применяется в `publish_videos_worker` (workers/videos.py) перед заливкой видео,
+если включён `antiplagiaat.enabled` ИЛИ `watermark` с `mode=logo`. Один проход
+ffmpeg делает разом:
+- вырезание случайных 2-4 сек из середины (`cut_seconds_min/max`) — сильнее всего ломает VK-хэш
+- кроп краёв + zoom обратно (`crop_percent`)
+- наложение PNG-лого через scale2ref+overlay (общий `watermark.logo_path` с фото)
+- eq: яркость/контраст/насыщенность + лёгкий поворот + шум
+- изменение скорости видео+аудио синхронно (`speed`)
+- очистка метаданных оригинала + подмена своими (`set_metadata`, `meta_*`)
+
+Настройки в профиле — блок `video_transform`. `hard_mode: true` = параметры
+рандомизируются на каждый прогон (два запуска дают разный результат). Значение
+`0` в crop_percent/speed/rotate_deg = «авто» (рандом в hard-режиме).
+
+**Видео/клипы в автопилоте:** `run_media_autopilot()` в workers/download.py
+вызывается после фото-этапа. Включается флагами `videos_settings.autopilot` и
+`clips_settings.autopilot`. Клипы заливаются как Reels (`is_reels=1`).
+
+Грабли: лого масштабируется через `scale2ref` (обычный `scale=main_w*...` падает
+с "Expressions with scale2ref variables not valid"). Вырез не применяется к видео
+короче 12 сек. Перекодировка libx264 veryfast crf23 — медленно по диску/CPU.
+
 ## Что осталось сделать
 
 - [ ] Дедупликация orphaned photo directories при запуске

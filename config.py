@@ -316,6 +316,7 @@ class AppState:
             },
             'videos_settings': {
                 'enabled': True,
+                'autopilot': False,        # участвует ли видео в автопилоте
                 'videos_per_run': 10,
                 'publish_delay_min': 10800,
                 'publish_delay_max': 21600,
@@ -327,6 +328,7 @@ class AppState:
             },
             'clips_settings': {
                 'enabled': True,
+                'autopilot': False,        # участвуют ли клипы в автопилоте
                 'clips_per_run': 10,
                 'publish_delay_min': 10800,
                 'publish_delay_max': 21600,
@@ -335,6 +337,24 @@ class AppState:
                 'max_duration_sec': 180,
                 'quality': '720',
                 'create_wall_post': True,
+            },
+            # Жёсткий антиплагиат для видео/клипов (ffmpeg). Пустые значения =
+            # рандомизируются на каждый прогон, чтобы результат был разным.
+            'video_transform': {
+                'hard_mode': True,         # рандомные параметры каждый раз
+                'crop_percent': 0.0,       # 0 = авто (0.04-0.08 в hard режиме)
+                'color_shift': True,
+                'speed': 0.0,              # 0 = авто (0.96-1.05)
+                'rotate_deg': 0.0,         # 0 = авто (±1.2°)
+                'noise': True,
+                'noise_strength': 6,
+                'cut_seconds_min': 2.0,    # вырезать случайные 2-4 сек
+                'cut_seconds_max': 4.0,
+                'strip_metadata': True,
+                'set_metadata': True,
+                'meta_title': '',
+                'meta_artist': '',
+                'meta_comment': '',
             },
             'stories': {
                 'interval_hours': 6,
