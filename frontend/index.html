@@ -112,32 +112,13 @@
           <div class="stat-card flat"><div class="stat-label">Очередь</div><div class="stat-value" id="gaQueueCount">0</div><div class="stat-sub">локальных файлов</div></div>
         </div>
 
-        <div style="padding:0 16px 4px">
-          <div onclick="toggleAccordion('gaChecksBody', this)" style="cursor:pointer;display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--muted)">
-            <span>Технические проверки</span><span class="accordion-chevron">▼</span>
-          </div>
-          <div id="gaChecksBody" style="display:none"><div id="gaChecksList" class="form-section"></div></div>
-        </div>
-
-        <div style="padding:0 16px 4px">
-          <div onclick="toggleAccordion('gaCandidatesBody', this)" style="cursor:pointer;display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--muted)">
-            <span>Лучшие кандидаты</span><span class="accordion-chevron">▼</span>
-          </div>
-          <div id="gaCandidatesBody" style="display:none">
-            <div style="overflow-x:auto">
-              <table style="width:100%;border-collapse:collapse;font-size:13px">
-                <thead><tr><th style="text-align:left;padding:8px;color:var(--muted);border-bottom:1px solid var(--border)">Рейтинг</th><th style="text-align:left;padding:8px;color:var(--muted);border-bottom:1px solid var(--border)">Источник</th><th style="text-align:left;padding:8px;color:var(--muted);border-bottom:1px solid var(--border)">Пост</th><th style="text-align:left;padding:8px;color:var(--muted);border-bottom:1px solid var(--border)">Причины</th><th style="text-align:left;padding:8px;color:var(--muted);border-bottom:1px solid var(--border)">Текст</th></tr></thead>
-                <tbody id="gaCandidatesBody_table"></tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div style="padding:0 16px 4px">
-          <div onclick="toggleAccordion('gaScheduleBody', this)" style="cursor:pointer;display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--muted)">
-            <span>План публикаций</span><span class="accordion-chevron">▼</span>
-          </div>
-          <div id="gaScheduleBody" style="display:none"><div id="gaScheduleList" class="form-section"></div></div>
+        <!-- Технические проверки, Лучшие кандидаты и План публикаций скрыты из UI
+             по запросу: данные считаются на бэкенде (нужны для расписания), но
+             не показываются. JS продолжает их заполнять в этот скрытый контейнер. -->
+        <div style="display:none">
+          <div id="gaChecksBody"><div id="gaChecksList"></div></div>
+          <div id="gaCandidatesBody"><table><tbody id="gaCandidatesBody_table"></tbody></table></div>
+          <div id="gaScheduleBody"><div id="gaScheduleList"></div></div>
         </div>
 
         <div style="padding:0 16px 12px">
