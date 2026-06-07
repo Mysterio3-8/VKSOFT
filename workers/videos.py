@@ -435,3 +435,142 @@ def _add_clips_seen(key: str):
         f.write_text(json.dumps(list(seen)), encoding='utf-8')
     except Exception:
         pass
+
+
+# ── Скачивание топ видео конкурентов по ER ────────────────────────
+
+def download_top_competitor_videos(count: int = 5, is_clips_mode: bool = False) -> int:
+    """Скачать топ-видео конкурентов по Engagement Rate.
+
+    Использует данные из competitor_data.json (накопленные competitor_scan_loop).
+    Отбирает видео из top20 конкурентов с наивысшим ER, которых ещё нет в seen.
+    Возвращает количество скачанных видео.
+    """
+    from services.competitor import _load_data
+    from vk.api import get_vk_api, normalize_owner_id
+
+    profile = app_state.profile
+    profile_id = app_state.active_profile_id
+    vk_cfg = profile.get('vk', {})
+    user_token = vk_cfg.get('user_token', '').strip()
+    if not user_token:
+        app_state.add_log('Топ видео конкурентов: user_token не задан', 'error')
+        return 0
+
+    cfg_key = 'clips_settings' if is_clips_mode else 'videos_settings'
+    cfg = profile.get(cfg_key, {})
+    max_mb = int(cfg.get('max_filesize_mb', 500))
+    quality = cfg.get('quality', '720')
+    max_duration = int(cfg.get('max_duration_sec', 180)) if is_clips_mode else 0
+
+    competitor_data = _load_data(profile_id)
+    if not competitor_data:
+        app_state.add_log('Топ видео конкурентов: нет данных по конкурентам (сканирование ещё не прошло)', 'warning')
+        return 0
+
+    # Собираем кандидатов из top20 каждого конкурента (только посты с видео)
+    candidates: list[dict] = []
+    for cid, source in competitor_data.items():
+        for post in source.get('top20', []):
+            if post.get('type') != 'video':
+                continue
+            candidates.append({
+                'cid': cid,
+                'post_id': post['post_id'],
+                'er': post['er'],
+                'owner_id': int(normalize_owner_id(cid).replace('-', '-')),
+            })
+
+    # Сортируем по ER, берём лучших
+    candidates.sort(key=lambda x: x['er'], reverse=True)
+
+    seen = _load_seen() if not is_clips_mode else _load_clips_seen()
+    queue_dir = app_state.clips_queue_dir if is_clips_mode else app_state.videos_queue_dir
+    files_dir = app_state.clip_files_dir if is_clips_mode else app_state.video_files_dir
+    label = 'Топ клипы' if is_clips_mode else 'Топ видео'
+
+    try:
+        vk = get_vk_api(user_token, vk_cfg.get('api_version', '5.131'))
+    except Exception as e:
+        app_state.add_log(f'{label}: VK API init error: {e}', 'error')
+        return 0
+
+    downloaded = 0
+    for cand in candidates:
+        if downloaded >= count:
+            break
+
+        cid = cand['cid']
+        post_id = cand['post_id']
+
+        # Получаем видео-аттачменты поста
+        try:
+            from vk.api import vk_call_safe, normalize_owner_id
+            owner_str = normalize_owner_id(cid)
+            resp = vk_call_safe(
+                vk.wall.getById,
+                posts=f'{owner_str}_{post_id}',
+                extended=0,
+            )
+            items = resp.get('items', []) if isinstance(resp, dict) else (resp or [])
+            if not items:
+                continue
+            post = items[0]
+            atts = post.get('attachments', [])
+            vid_atts = [a for a in atts if a.get('type') == 'video']
+        except Exception as e:
+            app_state.add_log(f'{label}: getById {cid}_{post_id}: {e}', 'warning')
+            continue
+
+        for va in vid_atts:
+            vid_obj = va.get('video', {})
+            vid_id = vid_obj.get('id')
+            vid_owner = vid_obj.get('owner_id')
+            if not vid_id or not vid_owner:
+                continue
+
+            key = f'{vid_owner}_{vid_id}'
+            if key in seen:
+                continue
+
+            duration = vid_obj.get('duration', 0)
+            if is_clips_mode:
+                if duration > 180 or (max_duration > 0 and duration > max_duration):
+                    continue
+            else:
+                if duration < 10:
+                    continue
+
+            dest = files_dir / f'{key}.mp4'
+            if not _download_video(vid_owner, vid_id, dest, quality, max_mb):
+                continue
+
+            meta = {
+                'id': vid_id,
+                'owner_id': vid_owner,
+                'title': vid_obj.get('title', ''),
+                'description': vid_obj.get('description', ''),
+                'duration': duration,
+                '_local_file': str(dest),
+                '_source_cid': cid,
+                '_is_clip': is_clips_mode,
+                '_competitor_er': cand['er'],
+            }
+            meta_file = queue_dir / f'{key}.json'
+            meta_file.write_text(json.dumps(meta, ensure_ascii=False), encoding='utf-8')
+
+            if is_clips_mode:
+                _add_clips_seen(key)
+            else:
+                _add_seen(key)
+
+            downloaded += 1
+            app_state.add_log(
+                f'{label}: скачал {key} (ER={cand["er"]:.2f}%, из {cid})',
+                'info'
+            )
+            time.sleep(random.uniform(1, 2))
+            break  # один видео на пост
+
+    app_state.add_log(f'{label} конкурентов: {downloaded} скачано', 'info')
+    return downloaded

@@ -265,3 +265,54 @@ async def check_suspicious():
         }
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
+
+
+# ── Learning & Competitor endpoints ──────────────────────────────
+
+@router.get('/growth/learning_state')
+async def get_learning_state_api():
+    """Текущее состояние обучения бота."""
+    try:
+        from services.learning import get_learning_state
+        state = get_learning_state(app_state.active_profile_id)
+        return {'status': 'ok', 'data': state}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.post('/growth/learning_run')
+async def trigger_learning():
+    """Запустить цикл обучения вручную."""
+    try:
+        from services.learning import run_learning_cycle
+        state = run_learning_cycle()
+        return {'status': 'ok', 'data': state}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.get('/growth/competitor_insights')
+async def get_competitor_insights_api():
+    """Агрегированные инсайты конкурентов."""
+    try:
+        from services.competitor import get_competitor_insights
+        insights = get_competitor_insights(app_state.active_profile_id)
+        return {'status': 'ok', 'data': insights}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.post('/growth/competitor_scan')
+async def trigger_competitor_scan():
+    """Запустить сканирование конкурентов вручную."""
+    import threading
+
+    def _run():
+        try:
+            from services.competitor import scan_all_competitors
+            scan_all_competitors()
+        except Exception as e:
+            app_state.add_log(f'competitor scan: {e}', 'error')
+
+    threading.Thread(target=_run, daemon=True, name='competitor_scan_manual').start()
+    return {'status': 'ok', 'message': 'Сканирование запущено в фоне'}

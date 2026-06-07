@@ -32,13 +32,18 @@ for _d in [STORAGE_DIR]:
 async def lifespan(app: FastAPI):
     import threading
     from workers.monitor import _watchdog_loop
-    from services.tracker import tracker_loop
+    from services.tracker import tracker_loop, bootstrap_from_wall
     from services.cleanup_storage import cleanup_loop
     from workers.growth_tasks import subscriber_tracker_loop
     threading.Thread(target=_watchdog_loop, daemon=True, name='watchdog').start()
     threading.Thread(target=tracker_loop, daemon=True, name='tracker').start()
+    threading.Thread(target=bootstrap_from_wall, daemon=True, name='tracker_bootstrap').start()
     threading.Thread(target=cleanup_loop, daemon=True, name='cleanup').start()
     threading.Thread(target=subscriber_tracker_loop, daemon=True, name='sub_tracker').start()
+    from services.competitor import competitor_scan_loop
+    from services.learning import learning_loop
+    threading.Thread(target=competitor_scan_loop, daemon=True, name='competitor_scan').start()
+    threading.Thread(target=learning_loop, daemon=True, name='learning').start()
     app_state.add_log('VK Post Bot запущен ✅', 'info')
     yield
     app_state.is_downloading = app_state.is_publishing = False

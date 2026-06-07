@@ -464,22 +464,25 @@ ffmpeg делает разом:
 
 ---
 
-## Checkpoint (2026-06-07 20:03)
+## Checkpoint (2026-06-07 20:53)
 
 **Сделано:**
-- Полная профилизация (многопрофильность)
-- Growth Autopilot с ежечасным трекингом подписчиков
-- Smart Brain рекомендации (в разработке)
-- Содержание контент-библиотеки (200 природных текстов + хештеги)
+- `services/competitor.py` — анализ конкурентов: топ посты по ER, heatmap по часам, тренды хештегов, статистика типов контента. Фоновый поток каждые 6ч.
+- `services/learning.py` — адаптивное обучение: смешивает сигнал своих постов + конкурентов, автоматически обновляет `peak_hours` в профиле. Фоновый поток каждый час.
+- `workers/videos.py` `download_top_competitor_videos()` — скачивает топ видео/клипы конкурентов отсортированные по ER
+- `workers/download.py` `run_media_autopilot()` — интеграция: если `learning.prefer_video=True` — доливает топ видео конкурентов
+- `workers/publish.py` — использует `get_smart_hashtags()` из learning при публикации (хештеги конкурентов с высоким ER)
+- `services/content_library.py` `compose_caption()` — поддержка `extra_tags` (выбирает 3 из конкурентских хештегов)
+- `api/growth.py` — 4 новых endpoint: `/growth/learning_state`, `/growth/learning_run`, `/growth/competitor_insights`, `/growth/competitor_scan`
 
 **Активно:**
-- Консолидация Growth Autopilot в dashboard widget
-- Локализация UI на русский
+- Нет незавершённого
 
 **Следующий шаг:**
-- Завершить консолидацию Growth UI в dashboard (убрать отдельные страницы)
-- Тестирование Smart Brain рекомендаций на реальных данных
-- Апгрейд контент-библиотеки до 500+ записей
+- Запустить бота, дать отработать competitor_scan_loop (~5 мин первый старт)
+- Проверить: `curl http://localhost:8000/api/growth/competitor_insights`
+- Проверить: `curl http://localhost:8000/api/growth/learning_state`
+- После 1ч проверить обновились ли peak_hours в config.json
 
 **Блокеры:**
 - Нет (зелёно)

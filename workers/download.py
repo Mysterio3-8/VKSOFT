@@ -374,11 +374,25 @@ def run_media_autopilot():
     vid_cfg = profile.get('videos_settings', {})
     clip_cfg = profile.get('clips_settings', {})
 
+    # Проверяем рекомендацию learning engine: если конкуренты показывают
+    # высокий ER у видео — скачиваем их топ видео дополнительно.
+    try:
+        from services.learning import get_learning_state
+        learning = get_learning_state(app_state.active_profile_id)
+        prefer_video = learning.get('prefer_video', False)
+        prefer_clips = learning.get('prefer_multi_photo', False)  # multi_photo → нет смысла, смотрим video
+    except Exception:
+        prefer_video = prefer_clips = False
+
     if vid_cfg.get('autopilot', False):
-        from workers.videos import download_videos_worker, publish_videos_worker
+        from workers.videos import download_videos_worker, publish_videos_worker, download_top_competitor_videos
         app_state.add_log('Автопилот: этап видео', 'info')
         app_state.is_downloading_videos = True
         download_videos_worker()
+        # Если learning рекомендует видео — доливаем топ конкурентов
+        if prefer_video:
+            app_state.add_log('Learning: видео в топе у конкурентов, качаю их топ', 'info')
+            download_top_competitor_videos(count=3, is_clips_mode=False)
         pending = len(list(app_state.videos_queue_dir.glob('*.json')))
         if pending > 0:
             app_state.is_publishing_videos = True
@@ -388,10 +402,14 @@ def run_media_autopilot():
 
     if clip_cfg.get('autopilot', False):
         from workers.clips import download_clips_worker
-        from workers.videos import publish_videos_worker
+        from workers.videos import publish_videos_worker, download_top_competitor_videos
         app_state.add_log('Автопилот: этап клипов', 'info')
         app_state.is_downloading_clips = True
         download_clips_worker()
+        # Если learning рекомендует видео — доливаем топ клипов конкурентов
+        if prefer_video:
+            app_state.add_log('Learning: клипы качаю у топ конкурентов', 'info')
+            download_top_competitor_videos(count=3, is_clips_mode=True)
         pending = len(list(app_state.clips_queue_dir.glob('*.json')))
         if pending > 0:
             app_state.is_publishing_clips = True

@@ -19,6 +19,40 @@ from vk.api import get_vk_api, vk_call_safe, normalize_owner_id, fetch_last_post
 from vk.upload import upload_photo_from_file
 
 
+def _upload_local_photos_with_fallback(vk_user, gid_num: int, selected_photos: list, all_local_photos: list, log) -> list:
+    attachments = []
+    selected_paths = [Path(pp) for pp in selected_photos]
+
+    for pp in selected_paths:
+        if not pp.exists():
+            log(f'Фото не найдено локально: {pp.name}', 'warning')
+            continue
+        att = upload_photo_from_file(vk_user, gid_num, pp)
+        if att:
+            attachments.append(att)
+
+    if attachments or not all_local_photos:
+        return attachments
+
+    selected_resolved = {str(pp.resolve()) for pp in selected_paths if pp.exists()}
+    fallback_paths = []
+    for pp_str in all_local_photos:
+        pp = Path(pp_str)
+        if pp.exists() and str(pp.resolve()) not in selected_resolved:
+            fallback_paths.append(pp)
+
+    if not fallback_paths:
+        return attachments
+
+    log(f'Фото: выбранные файлы не загрузились, пробую резервные ({len(fallback_paths)})', 'warning')
+    for pp in fallback_paths:
+        att = upload_photo_from_file(vk_user, gid_num, pp)
+        if att:
+            attachments.append(att)
+            break
+    return attachments
+
+
 def publish_worker(count: int):
     try:
         profile = app_state.profile
@@ -204,16 +238,20 @@ def publish_worker(count: int):
                     text = ''
 
                 from services.content_library import compose_caption
+                from services.learning import get_smart_hashtags
+                smart_tags = get_smart_hashtags(app_state.active_profile_id)
                 text = compose_caption(
                     text,
                     add_tags=True,
                     profile_tags=processing.get('hashtags', []),
                     add_profile_tags=processing.get('add_hashtags') or not text,
+                    extra_tags=smart_tags if smart_tags else None,
                 )
 
                 # Upload photos
                 attachments = []
                 local_photos = post.get('_local_photos', [])
+                all_local_photos = list(local_photos)
 
                 # РђРЅС‚РёРїР»Р°РіРёР°С‚: РѕРіСЂР°РЅРёС‡РёС‚СЊ РєРѕР»РёС‡РµСЃС‚РІРѕ С„РѕС‚Рѕ Рё РїРµСЂРµРјРµС€Р°С‚СЊ
                 if ap_cfg.get('enabled'):
@@ -263,14 +301,13 @@ def publish_worker(count: int):
                     if wm_ok:
                         app_state.add_log(f'Р’РѕРґСЏРЅРѕР№ Р·РЅР°Рє: {wm_ok} С„РѕС‚Рѕ', 'info')
 
-                for pp_str in local_photos:
-                    pp = Path(pp_str)
-                    if not pp.exists():
-                        app_state.add_log(f'Р¤РѕС‚Рѕ РЅРµ РЅР°Р№РґРµРЅРѕ Р»РѕРєР°Р»СЊРЅРѕ: {pp.name}', 'warning')
-                        continue
-                    att = upload_photo_from_file(vk_user, gid_num, pp)
-                    if att:
-                        attachments.append(att)
+                attachments.extend(_upload_local_photos_with_fallback(
+                    vk_user,
+                    gid_num,
+                    local_photos,
+                    all_local_photos,
+                    app_state.add_log,
+                ))
 
                 if local_photos:
                     app_state.add_log(
@@ -324,7 +361,7 @@ def publish_worker(count: int):
                             )
                             _smart_occupied = sorted(_smart_occupied + [next_ts])
                             app_state.add_log(
-                                f'[Умное расписание] {datetime.fromtimestamp(next_ts).strftime(“%d.%m %H:%M”)} (час {_chosen_hour})',
+                                f'[Умное расписание] {datetime.fromtimestamp(next_ts).strftime("%d.%m %H:%M")} (час {_chosen_hour})',
                                 'info'
                             )
                         except Exception as e:
