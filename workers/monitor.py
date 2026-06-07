@@ -39,28 +39,11 @@ def _monitor_add_published(cid: str, post_id: int):
     add_monitor_published(cid, post_id)
 
 
-def _wait_for_ollama(url: str, model: str, timeout_cycles: int = 20) -> bool:
-    """Ждём пока Ollama не ответит. Возвращает False если мониторинг остановлен."""
-    for _ in range(timeout_cycles):
-        if not app_state.is_monitoring:
-            return False
-        try:
-            r = req_lib.get(f'{url.rstrip("/")}/api/tags', timeout=5)
-            if r.status_code == 200:
-                return True
-        except Exception:
-            pass
-        app_state.add_monitor_log('Ollama недоступна, жду 60 сек...', 'warning')
-        time.sleep(60)
-    return False
-
-
 def _monitor_process_post(post: Dict, cid: str, profile: Dict,
                           vk_group, vk_user, gid_num: int, owner_id: str,
                           publish_ts: Optional[int]) -> bool:
     """Обработать и опубликовать один пост из мониторинга."""
     processing = profile.get('processing', {})
-    ol = profile.get('ollama', {})
     post_id = post.get('id')
     text = post.get('text', '').strip()
     attachments = post.get('attachments', [])
@@ -75,20 +58,6 @@ def _monitor_process_post(post: Dict, cid: str, profile: Dict,
     # Антиплагиат: убрать оригинальный текст (оставить только свои хэштеги)
     if ap_cfg.get('enabled') and ap_cfg.get('clear_text', True):
         text = ''
-
-    # Ollama: если включена — ждём пока не появится
-    if text and ol.get('enabled'):
-        if _wait_for_ollama(ol.get('url', 'http://localhost:11434'), ol.get('model', 'llama3.2:3b')):
-            rw = rewrite_with_ollama(
-                text,
-                ol['url'], ol['model'],
-                ol.get('target_words_min', 50),
-                ol.get('target_words_max', 80)
-            )
-            if rw:
-                text = rw
-        else:
-            return False
 
     # Hashtags
     if tags and (processing.get('add_hashtags') or not text):
@@ -137,7 +106,7 @@ def _monitor_process_post(post: Dict, cid: str, profile: Dict,
                     p = tmp_dir / f'photo_{i}.jpg'
                     p.write_bytes(resp.content)
 
-                    # OCR: пропускаем фото с текстом (AI-генеративные с подписью)
+                    # OCR: пропускаем фото с текстом
                     if mon_cfg.get('ocr_filter') and photo_has_text(p):
                         app_state.add_monitor_log(f'OCR: фото {i} содержит текст — пропускаю', 'info')
                         p.unlink(missing_ok=True)
@@ -442,32 +411,6 @@ def adjust_to_publish_window(ts: int, start_h: int, end_h: int) -> int:
             hour=start_h, minute=random.randint(0, 59), second=random.randint(0, 59)
         )
     return int(d.timestamp())
-
-
-def rewrite_with_ollama(text: str, url: str, model: str, min_w: int, max_w: int):
-    prompt = (
-        f"Перепиши текст для публикации ВКонтакте. "
-        f"Требования:\n- Строго от {min_w} до {max_w} слов\n"
-        f"- Сохрани тему и смысл\n- Живой естественный русский\n"
-        f"- Без вводных слов\n- Только переписанный текст\n\nТекст: {text}"
-    )
-    try:
-        resp = req_lib.post(
-            f'{url.rstrip("/")}/api/generate',
-            json={'model': model, 'prompt': prompt, 'stream': False},
-            timeout=90
-        )
-        resp.raise_for_status()
-        result = resp.json().get('response', '').strip()
-        if result:
-            app_state.add_log(f'Ollama: переписано ({len(result.split())} слов)', 'info')
-        return result or None
-    except req_lib.exceptions.ConnectionError:
-        app_state.add_log(f'Ollama недоступна по {url}', 'error')
-        return None
-    except Exception as e:
-        app_state.add_log(f'Ollama: {e}', 'error')
-        return None
 
 
 def random_delay(min_s: float, max_s: float):

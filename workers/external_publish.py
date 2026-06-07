@@ -5,7 +5,7 @@ import json
 import random
 import shutil
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -87,8 +87,12 @@ def publish_from_folder(
         attachments = []
         uploaded = 0
         failed = 0
+        if publish_delay_min > publish_delay_max:
+            publish_delay_min, publish_delay_max = publish_delay_max, publish_delay_min
         
         for photo_path in media_files[:10]:  # Ограничиваем 10 фото
+            if not app_state.is_publishing:
+                return {'status': 'stopped', 'message': 'Публикация остановлена'}
             try:
                 att = upload_photo_from_file(vk_user, gid_num, photo_path)
                 if att:
@@ -127,8 +131,7 @@ def publish_from_folder(
                 if next_time.hour < hours_start:
                     next_time = next_time.replace(hour=hours_start, minute=random.randint(0, 59))
                 elif next_time.hour >= hours_end:
-                    next_time = next_time.replace(hour=hours_start, minute=random.randint(0, 59))
-                    next_time = next_time.replace(day=next_time.day + 1)
+                    next_time = (next_time + timedelta(days=1)).replace(hour=hours_start, minute=random.randint(0, 59))
                 publish_ts = int(next_time.timestamp())
             
             params['publish_date'] = publish_ts

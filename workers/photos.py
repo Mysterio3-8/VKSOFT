@@ -312,12 +312,15 @@ def publish_photos_worker(count: int):
                     continue
 
                 if create_wall:
-                    from services.content_library import get_random_caption
+                    from services.content_library import compose_caption
                     base_text = meta.get('text', '')
-                    tags = ' '.join(profile.get('processing', {}).get('hashtags', []))
-                    text = get_random_caption(base_text, add_tags=True)
-                    if not text and tags:
-                        text = f'{base_text}\n\n{tags}'.strip() if base_text else tags
+                    processing = profile.get('processing', {})
+                    text = compose_caption(
+                        base_text,
+                        add_tags=True,
+                        profile_tags=processing.get('hashtags', []),
+                        add_profile_tags=processing.get('add_hashtags') or not base_text,
+                    )
 
                     now = int(time.time())
                     if next_ts <= now:
@@ -355,6 +358,15 @@ def publish_photos_worker(count: int):
                 failed += 1
 
         app_state.add_log(f'Фото: {published} опубликовано, {failed} ошибок', 'info')
+        if published > 0 and profile.get('storage_cleanup', {}).get('clean_orphans_after_run', True):
+            try:
+                from services.cleanup_storage import cleanup_junk
+                junk = cleanup_junk()
+                removed = sum(int(v or 0) for v in junk.values())
+                if removed:
+                    app_state.add_log(f'Фото автоочистка: удалено {removed} остаточных файлов/папок', 'info')
+            except Exception as e:
+                app_state.add_log(f'Фото автоочистка: {e}', 'warning')
 
     except Exception as e:
         app_state.add_log(f'Фото публикация критическая ошибка: {e}', 'error')

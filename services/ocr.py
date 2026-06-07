@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""OCR: определение текста на фото (AI-генеративные)."""
+"""OCR: определение текста на фото."""
 
 from pathlib import Path
 
@@ -8,7 +8,7 @@ from config import app_state
 
 def photo_has_text(path: Path, min_chars: int = 8) -> bool:
     """
-    Возвращает True если фото содержит значимый текст (скорее всего AI с подписью).
+    Возвращает True если фото содержит значимый текст.
     Требует: pip install pytesseract pillow  +  tesseract на PATH.
     """
     try:

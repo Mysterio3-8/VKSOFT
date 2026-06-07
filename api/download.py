@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """Download routes."""
 
+import threading
+
 from fastapi import APIRouter
 
 from config import app_state
-from workers.download import download_worker, download_all_worker
+from workers.download import download_worker, download_all_worker, download_then_publish_worker
 
 router = APIRouter()
 
@@ -18,7 +20,6 @@ async def start_download(data: dict):
     if not cid:
         return {'status': 'error', 'message': 'community_id не указан'}
     app_state.is_downloading = True
-    import threading
     threading.Thread(target=download_worker, args=(cid, count), daemon=True).start()
     return {'status': 'ok', 'message': f'Загрузка {count} постов запущена'}
 
@@ -27,19 +28,39 @@ async def start_download(data: dict):
 async def start_download_all():
     if app_state.is_downloading:
         return {'status': 'error', 'message': 'Загрузка уже идёт'}
-    from config import app_state
     sources = [s for s in app_state.profile.get('sources', []) if s.get('enabled')]
     if not sources:
         return {'status': 'error', 'message': 'Нет активных источников'}
     app_state.is_downloading = True
-    import threading
     threading.Thread(target=download_all_worker, daemon=True).start()
     return {'status': 'ok', 'message': f'Загрузка из {len(sources)} источников'}
+
+
+@router.post('/download/start_and_publish')
+async def start_download_and_publish():
+    if app_state.is_downloading:
+        return {'status': 'error', 'message': 'Загрузка уже идёт'}
+    if app_state.is_publishing:
+        return {'status': 'error', 'message': 'Публикация уже идёт'}
+    sources = [s for s in app_state.profile.get('sources', []) if s.get('enabled')]
+    if not sources:
+        return {'status': 'error', 'message': 'Нет активных источников'}
+    app_state.is_downloading = True
+    app_state.download_progress = {
+        'phase': 'download',
+        'current': 0,
+        'total': 0,
+        'source': 'Все источники',
+        'cancelled': False,
+    }
+    threading.Thread(target=download_then_publish_worker, daemon=True).start()
+    return {'status': 'ok', 'message': 'Загрузка и публикация запущены'}
 
 
 @router.post('/download/pause')
 async def pause_download():
     app_state.is_downloading = False
+    app_state.download_progress['cancelled'] = True
     app_state.add_log('Загрузка остановлена', 'warning')
     return {'status': 'ok'}
 
@@ -51,9 +72,12 @@ async def download_progress():
     c = p.get('current', 0)
     return {
         'is_downloading': app_state.is_downloading,
+        'is_publishing': app_state.is_publishing,
+        'phase': p.get('phase', 'idle'),
         'current': c, 'total': t,
         'percent': round(c / t * 100) if t else 0,
         'source': p.get('source', ''),
+        'message': p.get('message', ''),
     }
 
 

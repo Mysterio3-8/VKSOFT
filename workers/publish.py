@@ -1,15 +1,13 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Publish worker."""
 
 import json
 import random
-import shutil
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
-import requests as req_lib
 import vk_api
 
 from config import app_state
@@ -34,13 +32,13 @@ def publish_worker(count: int):
         api_ver = vk_cfg.get('api_version', '5.131')
 
         if not group_token:
-            app_state.add_log('Ошибка: Group Token не задан', 'error')
+            app_state.add_log('РћС€РёР±РєР°: Group Token РЅРµ Р·Р°РґР°РЅ', 'error')
             return
         if not user_token:
-            app_state.add_log('Ошибка: User Token не задан', 'error')
+            app_state.add_log('РћС€РёР±РєР°: User Token РЅРµ Р·Р°РґР°РЅ', 'error')
             return
         if not group_id:
-            app_state.add_log('Ошибка: Group ID не задан', 'error')
+            app_state.add_log('РћС€РёР±РєР°: Group ID РЅРµ Р·Р°РґР°РЅ', 'error')
             return
 
         vk = get_vk_api(group_token, api_ver)
@@ -54,7 +52,7 @@ def publish_worker(count: int):
         # Ensure delay_min <= delay_max to avoid empty range errors in randint/randrange
         if delay_min > delay_max:
             app_state.add_log(
-                f'Исправлены настройки задержки: publish_delay_min ({delay_min}) > publish_delay_max ({delay_max}), значения поменяны местами',
+                f'РСЃРїСЂР°РІР»РµРЅС‹ РЅР°СЃС‚СЂРѕР№РєРё Р·Р°РґРµСЂР¶РєРё: publish_delay_min ({delay_min}) > publish_delay_max ({delay_max}), Р·РЅР°С‡РµРЅРёСЏ РїРѕРјРµРЅСЏРЅС‹ РјРµСЃС‚Р°РјРё',
                 'warning'
             )
             delay_min, delay_max = delay_max, delay_min
@@ -62,7 +60,7 @@ def publish_worker(count: int):
         h_start = int(pub_cfg.get('publish_hours_start', 9))
         h_end = int(pub_cfg.get('publish_hours_end', 22))
 
-        # ── Пункт 2: пиковые часы ────────────────────────────────
+        # в”Ђв”Ђ РџСѓРЅРєС‚ 2: РїРёРєРѕРІС‹Рµ С‡Р°СЃС‹ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
         peak_cfg = profile.get('peak_hours', {})
         peak_on = peak_cfg.get('enabled', False)
         peak_hours_list = peak_cfg.get('hours', [])
@@ -71,10 +69,18 @@ def publish_worker(count: int):
 
         post_files = sorted(app_state.posts_dir.glob('*.json'))[:count]
         if not post_files:
-            app_state.add_log('Нет постов для публикации', 'warning')
+            app_state.add_log('РќРµС‚ РїРѕСЃС‚РѕРІ РґР»СЏ РїСѓР±Р»РёРєР°С†РёРё', 'warning')
             return
 
-        app_state.add_log(f'Публикация {len(post_files)} постов в {owner_id}', 'info')
+        app_state.download_progress = {
+            'phase': 'publish',
+            'current': 0,
+            'total': len(post_files),
+            'source': 'РћС‡РµСЂРµРґСЊ РїСѓР±Р»РёРєР°С†РёРё',
+            'message': 'РџСѓР±Р»РёРєР°С†РёСЏ РѕС‡РµСЂРµРґРё',
+            'cancelled': False,
+        }
+        app_state.add_log(f'РџСѓР±Р»РёРєР°С†РёСЏ {len(post_files)} РїРѕСЃС‚РѕРІ РІ {owner_id}', 'info')
         stats = app_state.load_stats()
 
         # Determine first publish time
@@ -86,109 +92,158 @@ def publish_worker(count: int):
             # fetch_last_postponed_from_vk uses user_token and makes multiple wall.get calls
             # which can trigger rate limits and account restrictions.
             file_age = (time.time() - ts_file.stat().st_mtime) if ts_file.exists() else float('inf')
-            if file_age > 3600:
-                app_state.add_log('Синхронизация с VK: ищу последний отложенный пост...', 'info')
+            if pub_cfg.get('skip_vk_sync', False):
+                vk_ts = None
+                app_state.add_log('VK sync skipped: fast postponed mode', 'info')
+            elif file_age > 3600:
+                app_state.add_log('РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ СЃ VK: РёС‰Сѓ РїРѕСЃР»РµРґРЅРёР№ РѕС‚Р»РѕР¶РµРЅРЅС‹Р№ РїРѕСЃС‚...', 'info')
                 vk_ts = fetch_last_postponed_from_vk(vk_user, owner_id)
             else:
                 vk_ts = None
                 app_state.add_log(
-                    f'Синхронизация пропущена (файл обновлён {int(file_age // 60)} мин назад, используем локальный)',
+                    f'РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ РїСЂРѕРїСѓС‰РµРЅР° (С„Р°Р№Р» РѕР±РЅРѕРІР»С‘РЅ {int(file_age // 60)} РјРёРЅ РЅР°Р·Р°Рґ, РёСЃРїРѕР»СЊР·СѓРµРј Р»РѕРєР°Р»СЊРЅС‹Р№)',
                     'info'
                 )
 
             if vk_ts and file_ts:
                 last_ts = max(vk_ts, file_ts)
-                src = 'VK' if vk_ts >= file_ts else 'файл'
+                src = 'VK' if vk_ts >= file_ts else 'С„Р°Р№Р»'
                 app_state.add_log(
-                    f'Опорная дата: {datetime.fromtimestamp(last_ts).strftime("%d.%m.%Y %H:%M")} (источник: {src})',
+                    f'РћРїРѕСЂРЅР°СЏ РґР°С‚Р°: {datetime.fromtimestamp(last_ts).strftime("%d.%m.%Y %H:%M")} (РёСЃС‚РѕС‡РЅРёРє: {src})',
                     'info'
                 )
             elif vk_ts:
                 last_ts = vk_ts
                 app_state.add_log(
-                    f'Опорная дата из VK: {datetime.fromtimestamp(last_ts).strftime("%d.%m.%Y %H:%M")}', 'info'
+                    f'РћРїРѕСЂРЅР°СЏ РґР°С‚Р° РёР· VK: {datetime.fromtimestamp(last_ts).strftime("%d.%m.%Y %H:%M")}', 'info'
                 )
             elif file_ts:
                 last_ts = file_ts
                 app_state.add_log(
-                    f'Опорная дата из файла: {datetime.fromtimestamp(last_ts).strftime("%d.%m.%Y %H:%M")}',
+                    f'РћРїРѕСЂРЅР°СЏ РґР°С‚Р° РёР· С„Р°Р№Р»Р°: {datetime.fromtimestamp(last_ts).strftime("%d.%m.%Y %H:%M")}',
                     'info'
                 )
             else:
                 last_ts = int(time.time())
-                app_state.add_log('Отложенных постов нет, начинаю с текущего времени', 'info')
+                app_state.add_log('РћС‚Р»РѕР¶РµРЅРЅС‹С… РїРѕСЃС‚РѕРІ РЅРµС‚, РЅР°С‡РёРЅР°СЋ СЃ С‚РµРєСѓС‰РµРіРѕ РІСЂРµРјРµРЅРё', 'info')
 
             write_last_scheduled(last_ts)
             next_ts = last_ts + random.randint(delay_min, delay_max)
         else:
             next_ts = int(time.time())
 
+        learned_schedule_slots = []
+        growth_schedule = profile.get('growth_schedule', {})
+        if postponed and growth_schedule.get('enabled') and growth_schedule.get('mode') == 'learned_24h':
+            try:
+                from services.growth_autopilot import build_learned_24h_schedule
+                learned_schedule_slots = build_learned_24h_schedule(
+                    count=len(post_files),
+                    start_ts=next_ts,
+                    heatmap=growth_schedule.get('hour_heatmap', []),
+                    horizon_days=int(growth_schedule.get('horizon_days') or profile.get('autopost_cycle', {}).get('horizon_days') or 1),
+                    exploitation_percent=int(growth_schedule.get('exploitation_percent') or 75),
+                )
+                if learned_schedule_slots:
+                    app_state.add_log(
+                        f'Growth schedule 24/7: {len(learned_schedule_slots)} slots, best/test hours enabled',
+                        'info'
+                    )
+            except Exception as e:
+                app_state.add_log(f'Growth schedule 24/7 fallback: {e}', 'warning')
+
         published = failed = 0
         _poll_counter = 0
 
-        for post_file in post_files:
+        publish_started_at = time.time()
+        for index, post_file in enumerate(post_files, 1):
             if not app_state.is_publishing:
                 break
             try:
+                post_started_at = time.time()
+                app_state.download_progress.update({
+                    'phase': 'publish',
+                    'current': index - 1,
+                    'total': len(post_files),
+                    'message': f'РџСѓР±Р»РёРєР°С†РёСЏ {index} РёР· {len(post_files)}',
+                })
                 post = json.loads(post_file.read_text(encoding='utf-8'))
                 text = post.get('text', '').strip()
-                ol = profile.get('ollama', {})
                 tags = ' '.join(processing.get('hashtags', []))
                 ap_cfg = profile.get('antiplagiaat', {})
 
-                # Photo-only: discard text, skip Ollama
+                # Photo-only: discard text.
                 if processing.get('photo_only', False):
                     text = ''
 
-                # Антиплагиат: убрать оригинальный текст (оставить только свои хэштеги)
+                # РђРЅС‚РёРїР»Р°РіРёР°С‚: СѓР±СЂР°С‚СЊ РѕСЂРёРіРёРЅР°Р»СЊРЅС‹Р№ С‚РµРєСЃС‚ (РѕСЃС‚Р°РІРёС‚СЊ С‚РѕР»СЊРєРѕ СЃРІРѕРё С…СЌС€С‚РµРіРё)
                 if ap_cfg.get('enabled') and ap_cfg.get('clear_text', True):
                     text = ''
 
-                # Ollama rewrite
-                if text and ol.get('enabled'):
-                    rw = rewrite_with_ollama(text, ol['url'], ol['model'],
-                                             ol.get('target_words_min', 50),
-                                             ol.get('target_words_max', 80))
-                    if rw:
-                        text = rw
-
-                # Контент-библиотека: заменить текст+теги случайным вариантом
-                from services.content_library import get_random_caption
-                text = get_random_caption(text, add_tags=True)
-
-                # Hashtags (если библиотека выключена — стандартный путь)
-                if not text or (tags and (processing.get('add_hashtags') or not text)):
-                    if tags and (processing.get('add_hashtags') or not text):
-                        text = f'{text}\n\n{tags}'.strip() if text else tags
+                from services.content_library import compose_caption
+                text = compose_caption(
+                    text,
+                    add_tags=True,
+                    profile_tags=processing.get('hashtags', []),
+                    add_profile_tags=processing.get('add_hashtags') or not text,
+                )
 
                 # Upload photos
                 attachments = []
                 local_photos = post.get('_local_photos', [])
 
-                # Антиплагиат: ограничить количество фото и перемешать
+                # РђРЅС‚РёРїР»Р°РіРёР°С‚: РѕРіСЂР°РЅРёС‡РёС‚СЊ РєРѕР»РёС‡РµСЃС‚РІРѕ С„РѕС‚Рѕ Рё РїРµСЂРµРјРµС€Р°С‚СЊ
                 if ap_cfg.get('enabled'):
                     max_ph = int(ap_cfg.get('max_photos', 5))
-                    if len(local_photos) > max_ph:
-                        mode = ap_cfg.get('remove_photo', 'last')
+                    mode = ap_cfg.get('remove_photo', 'random')
+                    if len(local_photos) >= 2:
+                        before = len(local_photos)
                         if mode == 'first':
                             local_photos = local_photos[1:]
-                        elif mode == 'random':
+                        elif mode == 'last':
+                            local_photos = local_photos[:-1]
+                        else:
                             idx = random.randint(0, len(local_photos) - 1)
                             local_photos = local_photos[:idx] + local_photos[idx + 1:]
-                        else:  # last
-                            local_photos = local_photos[:-1]
                         app_state.add_log(
-                            f'Антиплагиат: фото {len(local_photos) + 1} → {len(local_photos)} (режим: {mode})',
+                            f'РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ {before} в†’ {len(local_photos)} (СѓРґР°Р»РµРЅРѕ РѕРґРЅРѕ, СЂРµР¶РёРј: {mode})',
                             'info'
                         )
-                    # Перемешиваем фото — уникальный порядок для каждого поста
+                    if len(local_photos) > max_ph:
+                        before = len(local_photos)
+                        mode = ap_cfg.get('remove_photo', 'last')
+                        random.shuffle(local_photos)
+                        local_photos = local_photos[:max_ph]
+                        app_state.add_log(
+                            f'РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ {before} в†’ {len(local_photos)} (Р»РёРјРёС‚: {max_ph})',
+                            'info'
+                        )
+                    # РџРµСЂРµРјРµС€РёРІР°РµРј С„РѕС‚Рѕ вЂ” СѓРЅРёРєР°Р»СЊРЅС‹Р№ РїРѕСЂСЏРґРѕРє РґР»СЏ РєР°Р¶РґРѕРіРѕ РїРѕСЃС‚Р°
                     random.shuffle(local_photos)
-                    app_state.add_log('Антиплагиат: фото перемешаны', 'info')
+                    app_state.add_log('РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ РїРµСЂРµРјРµС€Р°РЅС‹', 'info')
+
+                # Р¤РѕС‚Рѕ-С‚СЂР°РЅСЃС„РѕСЂРјР°С†РёРё Р°РЅС‚РёРїР»Р°РіРёР°С‚ (РєСЂРѕРї, С†РІРµС‚, Р·РµСЂРєР°Р»Рѕ)
+                if ap_cfg.get('enabled') and local_photos:
+                    from services.photo_transform import apply_transforms_from_profile
+                    tr_ok = apply_transforms_from_profile(local_photos, profile)
+                    if tr_ok:
+                        app_state.add_log(f'РђРЅС‚РёРїР»Р°РіРёР°С‚ С‚СЂР°РЅСЃС„РѕСЂРјР°С†РёРё: {tr_ok} С„РѕС‚Рѕ', 'info')
+
+                # Р’РѕРґСЏРЅРѕР№ Р·РЅР°Рє вЂ” РЅР°Р»РѕР¶РёС‚СЊ РїРµСЂРµРґ Р·Р°РіСЂСѓР·РєРѕР№ РІ VK
+                wm_cfg = profile.get('watermark', {})
+                if wm_cfg.get('enabled') and local_photos:
+                    from services.watermark import apply_watermark_from_profile
+                    wm_ok = 0
+                    for pp_str in local_photos:
+                        if apply_watermark_from_profile(pp_str, profile):
+                            wm_ok += 1
+                    if wm_ok:
+                        app_state.add_log(f'Р’РѕРґСЏРЅРѕР№ Р·РЅР°Рє: {wm_ok} С„РѕС‚Рѕ', 'info')
 
                 for pp_str in local_photos:
                     pp = Path(pp_str)
                     if not pp.exists():
-                        app_state.add_log(f'Фото не найдено локально: {pp.name}', 'warning')
+                        app_state.add_log(f'Р¤РѕС‚Рѕ РЅРµ РЅР°Р№РґРµРЅРѕ Р»РѕРєР°Р»СЊРЅРѕ: {pp.name}', 'warning')
                         continue
                     att = upload_photo_from_file(vk_user, gid_num, pp)
                     if att:
@@ -196,23 +251,27 @@ def publish_worker(count: int):
 
                 if local_photos:
                     app_state.add_log(
-                        f'Фото загружено: {len(attachments)}/{len(local_photos)}',
+                        f'Р¤РѕС‚Рѕ Р·Р°РіСЂСѓР¶РµРЅРѕ: {len(attachments)}/{len(local_photos)}',
                         'info' if attachments else 'error'
                     )
                     if not attachments:
                         app_state.add_log(
-                            f'Пост {post_file.stem}: все фото не загружены — пропускаю',
+                            f'РџРѕСЃС‚ {post_file.stem}: РІСЃРµ С„РѕС‚Рѕ РЅРµ Р·Р°РіСЂСѓР¶РµРЅС‹ вЂ” РїСЂРѕРїСѓСЃРєР°СЋ',
                             'error'
                         )
                         failed += 1
+                        app_state.download_progress.update({
+                            'current': index,
+                            'message': f'РћРїСѓР±Р»РёРєРѕРІР°РЅРѕ {published}, РѕС€РёР±РѕРє {failed}',
+                        })
                         app_state.bump_daily_stat('errors')
                         continue
 
-                # Видео — прикрепляем по VK ID без повторной загрузки
+                # Р’РёРґРµРѕ вЂ” РїСЂРёРєСЂРµРїР»СЏРµРј РїРѕ VK ID Р±РµР· РїРѕРІС‚РѕСЂРЅРѕР№ Р·Р°РіСЂСѓР·РєРё
                 for vid_ref in post.get('_vk_videos', []):
                     attachments.append(vid_ref)
                 if post.get('_vk_videos'):
-                    app_state.add_log(f'Видео прикреплено: {len(post["_vk_videos"])}', 'info')
+                    app_state.add_log(f'Р’РёРґРµРѕ РїСЂРёРєСЂРµРїР»РµРЅРѕ: {len(post["_vk_videos"])}', 'info')
 
                 # Polls: attach every N posts
                 _poll_counter += 1
@@ -232,12 +291,14 @@ def publish_worker(count: int):
                     params['attachments'] = ','.join(attachments)
 
                 if postponed:
+                    if learned_schedule_slots and index <= len(learned_schedule_slots):
+                        next_ts = learned_schedule_slots[index - 1].ts
                     # Ensure publish_date is in the future (VK API requirement)
                     now = int(time.time())
                     if next_ts <= now:
                         next_ts = now + random.randint(delay_min, delay_max)
                         app_state.add_log(
-                            f'Дата в прошлом, скорректировано на {delay_min}-{delay_max}с',
+                            f'Р”Р°С‚Р° РІ РїСЂРѕС€Р»РѕРј, СЃРєРѕСЂСЂРµРєС‚РёСЂРѕРІР°РЅРѕ РЅР° {delay_min}-{delay_max}СЃ',
                             'warning'
                         )
                     if peak_on and peak_hours_list:
@@ -249,18 +310,18 @@ def publish_worker(count: int):
 
                 result = vk_call_safe(vk.wall.post, **params)
 
-                # ── Пункт 7: трекинг поста ────────────────────────
+                # в”Ђв”Ђ РџСѓРЅРєС‚ 7: С‚СЂРµРєРёРЅРі РїРѕСЃС‚Р° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
                 if result and isinstance(result, dict):
                     vk_post_id = result.get('post_id')
                     if vk_post_id:
                         try:
                             from services.tracker import track as _track
                             source_cid = post.get('owner_id', '')
-                            _track(vk_post_id, owner_id, str(source_cid))
+                            _track(vk_post_id, owner_id, str(source_cid), published_at=params.get('publish_date'))
                         except Exception:
                             pass
 
-                # ── Пункт 3: кросс-постинг ───────────────────────
+                # в”Ђв”Ђ РџСѓРЅРєС‚ 3: РєСЂРѕСЃСЃ-РїРѕСЃС‚РёРЅРі в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
                 cross_cfg = profile.get('cross_post', {})
                 if cross_cfg.get('enabled') and cross_cfg.get('profile_ids'):
                     _cross_post(params, local_photos, cross_cfg['profile_ids'], vk_cfg, api_ver)
@@ -270,21 +331,35 @@ def publish_worker(count: int):
                     write_last_scheduled(next_ts)
                     next_ts += random.randint(delay_min, delay_max)
 
-                # Auto-cleanup: delete JSON + photo dir
-                post_file.unlink(missing_ok=True)
-                photo_dir = app_state.photos_dir / post_file.stem
-                if photo_dir.exists():
-                    shutil.rmtree(photo_dir, ignore_errors=True)
+                # Auto-cleanup: delete only after successful VK post.
+                cleanup_cfg = profile.get('storage_cleanup', {})
+                if cleanup_cfg.get('after_publish_success', True):
+                    try:
+                        from services.cleanup_storage import cleanup_post_artifacts
+                        cleanup_result = cleanup_post_artifacts(post_file, post)
+                        app_state.add_log(
+                            'РђРІС‚РѕРѕС‡РёСЃС‚РєР°: СѓРґР°Р»РµРЅРѕ '
+                            f'{cleanup_result.get("deleted_json", 0)} json, '
+                            f'{cleanup_result.get("deleted_files", 0)} С„Р°Р№Р»РѕРІ',
+                            'info'
+                        )
+                    except Exception as e:
+                        app_state.add_log(f'РђРІС‚РѕРѕС‡РёСЃС‚РєР° РїРѕСЃС‚Р°: {e}', 'warning')
 
                 published += 1
+                post_elapsed = max(1, int(time.time() - post_started_at))
+                app_state.download_progress.update({
+                    'current': index,
+                    'message': f'РћРїСѓР±Р»РёРєРѕРІР°РЅРѕ {published}, РѕС€РёР±РѕРє {failed}',
+                })
                 stats['published'] = stats.get('published', 0) + 1
                 app_state.save_stats(stats)
                 app_state.bump_daily_stat('published')
-
                 if postponed:
-                    app_state.add_log(f'Запланирован {published}/{len(post_files)} → {scheduled_label}', 'info')
+                    app_state.add_log(f'publish timing: post {published}/{len(post_files)} in {post_elapsed}s, attachments={len(attachments)}', 'info')
+                    app_state.add_log(f'Р—Р°РїР»Р°РЅРёСЂРѕРІР°РЅ {published}/{len(post_files)} в†’ {scheduled_label}', 'info')
                 else:
-                    app_state.add_log(f'Опубликован {published}/{len(post_files)}', 'info')
+                    app_state.add_log(f'РћРїСѓР±Р»РёРєРѕРІР°РЅ {published}/{len(post_files)}', 'info')
                     if delay_min > 0:
                         random_delay(delay_min, delay_max)
                     else:
@@ -292,64 +367,62 @@ def publish_worker(count: int):
 
             except vk_api.exceptions.ApiError as e:
                 code = getattr(e, 'code', 0)
-                msg = f'VK API ошибка {code}: {e}'
+                msg = f'VK API РѕС€РёР±РєР° {code}: {e}'
                 app_state.add_log(msg, 'error')
                 if code == 214 and postponed:
-                    # Time slot taken — shift to the next random slot and retry
+                    # Time slot taken вЂ” shift to the next random slot and retry
                     next_ts += random.randint(max(60, delay_min), max(120, delay_max))
                     app_state.add_log(
-                        f'Время занято, сдвигаю → {datetime.fromtimestamp(next_ts).strftime("%d.%m %H:%M")}',
+                        f'Р’СЂРµРјСЏ Р·Р°РЅСЏС‚Рѕ, СЃРґРІРёРіР°СЋ в†’ {datetime.fromtimestamp(next_ts).strftime("%d.%m %H:%M")}',
                         'warning'
                     )
                 failed += 1
+                app_state.download_progress.update({
+                    'current': index,
+                    'message': f'РћРїСѓР±Р»РёРєРѕРІР°РЅРѕ {published}, РѕС€РёР±РѕРє {failed}',
+                })
                 stats['failed'] = stats.get('failed', 0) + 1
                 app_state.save_stats(stats)
                 app_state.bump_daily_stat('errors')
                 if code in (5, 28):
-                    send_critical_alert(f'Токен VK недействителен (код {code}). Бот остановлен.')
+                    send_critical_alert(f'РўРѕРєРµРЅ VK РЅРµРґРµР№СЃС‚РІРёС‚РµР»РµРЅ (РєРѕРґ {code}). Р‘РѕС‚ РѕСЃС‚Р°РЅРѕРІР»РµРЅ.')
                     app_state.is_publishing = False
                     break
             except Exception as e:
-                app_state.add_log(f'Ошибка поста: {e}', 'error')
+                app_state.add_log(f'РћС€РёР±РєР° РїРѕСЃС‚Р°: {e}', 'error')
                 failed += 1
+                app_state.download_progress.update({
+                    'current': index,
+                    'message': f'РћРїСѓР±Р»РёРєРѕРІР°РЅРѕ {published}, РѕС€РёР±РѕРє {failed}',
+                })
                 app_state.bump_daily_stat('errors')
 
-        result_msg = f'Публикация завершена: {published} запланировано, {failed} ошибок'
+        result_msg = f'РџСѓР±Р»РёРєР°С†РёСЏ Р·Р°РІРµСЂС€РµРЅР°: {published} Р·Р°РїР»Р°РЅРёСЂРѕРІР°РЅРѕ, {failed} РѕС€РёР±РѕРє'
+        app_state.add_log(f'publish done: scheduled {published}, errors {failed}, total {max(1, int(time.time() - publish_started_at))}s', 'info')
         app_state.add_log(result_msg, 'info')
 
+        if published > 0 and profile.get('storage_cleanup', {}).get('clean_orphans_after_run', True):
+            try:
+                from services.cleanup_storage import cleanup_junk
+                junk = cleanup_junk()
+                removed = sum(int(v or 0) for v in junk.values())
+                if removed:
+                    app_state.add_log(
+                        f'РђРІС‚РѕРѕС‡РёСЃС‚РєР° РјСѓСЃРѕСЂР°: СѓРґР°Р»РµРЅРѕ {removed} РѕСЃС‚Р°С‚РѕС‡РЅС‹С… С„Р°Р№Р»РѕРІ/РїР°РїРѕРє',
+                        'info'
+                    )
+            except Exception as e:
+                app_state.add_log(f'РђРІС‚РѕРѕС‡РёСЃС‚РєР° РјСѓСЃРѕСЂР°: {e}', 'warning')
+
         if published == 0 and failed > 0:
-            send_critical_alert(f'Публикация: 0 успехов, {failed} ошибок. Проверь токены.')
+            send_critical_alert(f'РџСѓР±Р»РёРєР°С†РёСЏ: 0 СѓСЃРїРµС…РѕРІ, {failed} РѕС€РёР±РѕРє. РџСЂРѕРІРµСЂСЊ С‚РѕРєРµРЅС‹.')
 
     except Exception as e:
-        app_state.add_log(f'Критическая ошибка публикации: {e}', 'error')
+        app_state.add_log(f'РљСЂРёС‚РёС‡РµСЃРєР°СЏ РѕС€РёР±РєР° РїСѓР±Р»РёРєР°С†РёРё: {e}', 'error')
     finally:
         app_state.is_publishing = False
-
-
-def rewrite_with_ollama(text: str, url: str, model: str, min_w: int, max_w: int):
-    prompt = (
-        f"Перепиши текст для публикации ВКонтакте. "
-        f"Требования:\n- Строго от {min_w} до {max_w} слов\n"
-        f"- Сохрани тему и смысл\n- Живой естественный русский\n"
-        f"- Без вводных слов\n- Только переписанный текст\n\nТекст: {text}"
-    )
-    try:
-        resp = req_lib.post(
-            f'{url.rstrip("/")}/api/generate',
-            json={'model': model, 'prompt': prompt, 'stream': False},
-            timeout=90
-        )
-        resp.raise_for_status()
-        result = resp.json().get('response', '').strip()
-        if result:
-            app_state.add_log(f'Ollama: переписано ({len(result.split())} слов)', 'info')
-        return result or None
-    except req_lib.exceptions.ConnectionError:
-        app_state.add_log(f'Ollama недоступна по {url}', 'error')
-        return None
-    except Exception as e:
-        app_state.add_log(f'Ollama: {e}', 'error')
-        return None
+        if not app_state.is_downloading:
+            app_state.download_progress['phase'] = 'idle'
 
 
 def random_delay(min_s: float, max_s: float):
@@ -370,18 +443,18 @@ def adjust_to_publish_window(ts: int, start_h: int, end_h: int) -> int:
 
 
 def adjust_to_peak_hours(ts: int, peak_hours: list) -> int:
-    """Сдвинуть timestamp на ближайший пиковый час (пункт 2)."""
+    """РЎРґРІРёРЅСѓС‚СЊ timestamp РЅР° Р±Р»РёР¶Р°Р№С€РёР№ РїРёРєРѕРІС‹Р№ С‡Р°СЃ (РїСѓРЅРєС‚ 2)."""
     if not peak_hours:
         return ts
     from datetime import datetime as _dt, timedelta
     peak_hours = sorted(set(int(h) for h in peak_hours if 0 <= int(h) <= 23))
     d = _dt.fromtimestamp(ts)
-    # Ищем ближайший пиковый час >= текущего часа сегодня
+    # РС‰РµРј Р±Р»РёР¶Р°Р№С€РёР№ РїРёРєРѕРІС‹Р№ С‡Р°СЃ >= С‚РµРєСѓС‰РµРіРѕ С‡Р°СЃР° СЃРµРіРѕРґРЅСЏ
     for h in peak_hours:
         if h >= d.hour:
             d = d.replace(hour=h, minute=random.randint(0, 59), second=random.randint(0, 59))
             return int(d.timestamp())
-    # Все пики сегодня позади — берём первый пик завтра
+    # Р’СЃРµ РїРёРєРё СЃРµРіРѕРґРЅСЏ РїРѕР·Р°РґРё вЂ” Р±РµСЂС‘Рј РїРµСЂРІС‹Р№ РїРёРє Р·Р°РІС‚СЂР°
     d = (d + timedelta(days=1)).replace(
         hour=peak_hours[0], minute=random.randint(0, 59), second=random.randint(0, 59)
     )
@@ -390,7 +463,7 @@ def adjust_to_peak_hours(ts: int, peak_hours: list) -> int:
 
 def _cross_post(params: dict, local_photos: list, target_pids: list,
                 src_vk_cfg: dict, api_ver: str):
-    """Опубликовать тот же пост в другие каналы (пункт 3)."""
+    """РћРїСѓР±Р»РёРєРѕРІР°С‚СЊ С‚РѕС‚ Р¶Рµ РїРѕСЃС‚ РІ РґСЂСѓРіРёРµ РєР°РЅР°Р»С‹ (РїСѓРЅРєС‚ 3)."""
     from vk.api import get_vk_api, vk_call_safe
     from vk.upload import upload_photo_from_file
     from pathlib import Path
@@ -424,9 +497,9 @@ def _cross_post(params: dict, local_photos: list, target_pids: list,
             if cross_att:
                 cp['attachments'] = ','.join(cross_att)
             elif 'publish_date' in cp:
-                pass  # оставляем как есть
+                pass  # РѕСЃС‚Р°РІР»СЏРµРј РєР°Рє РµСЃС‚СЊ
 
             vk_call_safe(vk_g.wall.post, **cp)
-            app_state.add_log(f'Кросс-пост → канал «{prof.get("name", pid)}»', 'info')
+            app_state.add_log(f'РљСЂРѕСЃСЃ-РїРѕСЃС‚ в†’ РєР°РЅР°Р» В«{prof.get("name", pid)}В»', 'info')
         except Exception as e:
-            app_state.add_log(f'Кросс-пост {pid}: {e}', 'warning')
+            app_state.add_log(f'РљСЂРѕСЃСЃ-РїРѕСЃС‚ {pid}: {e}', 'warning')

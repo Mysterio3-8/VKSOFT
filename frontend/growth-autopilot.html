@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Growth Autopilot — цикл автопостинга</title>
+  <link rel="stylesheet" href="/style.css?v=growth-autopilot-20260604">
+  <style>
+    body { background: #f6f7fb; }
+    .ga-main { margin-left: 0; min-height: 100vh; }
+    .ga-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .ga-table-wrap { overflow-x: auto; }
+    .ga-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .ga-table th, .ga-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .ga-table th { color: var(--muted); font-weight: 600; }
+    .ga-check { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; }
+    .ga-check:last-child { border-bottom: 0; }
+    .ga-ok { color: var(--success); font-weight: 700; }
+    .ga-stop { color: var(--error); font-weight: 700; }
+    .ga-schedule-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .ga-schedule-item:last-child { border-bottom: 0; }
+    @media (max-width: 900px) { .ga-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main class="main ga-main">
+  <div class="topbar">
+    <span class="topbar-title">Growth Autopilot: цикл автопостинга</span>
+    <div class="topbar-actions">
+      <button class="btn btn-ghost btn-sm" onclick="location.href='/'">Назад</button>
+      <button class="btn btn-ghost btn-sm" onclick="loadStatus()">Обновить</button>
+    </div>
+  </div>
+
+  <div class="content-area">
+    <section class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon">GA</span>Скачать, переделать и поставить в отложку</div>
+      </div>
+      <div class="form-section">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Режим источника</label>
+            <select class="form-input" id="sourceMode">
+              <option value="single">Один источник</option>
+              <option value="approved">Одобренные источники</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Один источник VK</label>
+            <input class="form-input" id="singleSourceId" placeholder="ID сообщества">
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label class="form-label">Дней вперед</label>
+            <input class="form-input" id="horizonDays" type="number" min="1" max="7" value="2">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Постов в день</label>
+            <input class="form-input" id="postsPerDay" type="number" min="1" value="12">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Мин. viral score</label>
+            <input class="form-input" id="minScore" type="number" min="0" value="30">
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label class="form-label">Публиковать с</label>
+            <input class="form-input" id="hoursStart" type="number" min="0" max="23" value="8">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Публиковать до</label>
+            <input class="form-input" id="hoursEnd" type="number" min="0" max="23" value="23">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Антиплагиат</label>
+            <input class="form-input" value="Жесткий: кроп, цвет, зеркало, метаданные, phash" readonly>
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button class="btn btn-secondary btn-lg" onclick="runGrowth()">Проверить план</button>
+          <button class="btn btn-primary btn-lg" onclick="startCycle()">Запустить цикл</button>
+          <button class="btn btn-ghost btn-lg" onclick="analyzeCycle()">Анализ</button>
+          <span id="statusText" class="form-hint"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="ga-grid" style="margin-top:16px">
+      <div class="stat-card">
+        <div class="stat-label">Кандидатов</div>
+        <div class="stat-value" id="candidateCount">0</div>
+        <div class="stat-sub">после фильтров</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Запланировано</div>
+        <div class="stat-value" id="scheduledCount">0</div>
+        <div class="stat-sub">предпросмотр</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Очередь</div>
+        <div class="stat-value" id="queueCountGa">0</div>
+        <div class="stat-sub">локальных файлов</div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <div class="card-header"><div class="card-title">Технические проверки</div></div>
+      <div id="checksList" class="form-section"></div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <div class="card-header"><div class="card-title">Лучшие кандидаты</div></div>
+      <div class="ga-table-wrap">
+        <table class="ga-table">
+          <thead><tr><th>Score</th><th>Источник</th><th>Пост</th><th>Причины</th><th>Текст</th></tr></thead>
+          <tbody id="candidatesBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <div class="card-header"><div class="card-title">План публикаций</div></div>
+      <div id="scheduleList" class="form-section"></div>
+    </section>
+
+    <section class="card" style="margin-top:16px">
+      <div class="card-header"><div class="card-title">Алгоритмические рекомендации</div></div>
+      <div id="recommendationBlock" class="form-section"><div class="form-hint">После публикаций нажми “Анализ”.</div></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const api = (path, options = {}) => fetch('/api' + path, {
+  headers: {'Content-Type': 'application/json'},
+  ...options
+}).then(r => r.json());
+
+function settingsFromForm() {
+  return {
+    source_mode: document.getElementById('sourceMode').value,
+    single_source_id: document.getElementById('singleSourceId').value.trim(),
+    horizon_days: Number(document.getElementById('horizonDays').value || 2),
+    posts_per_day: Number(document.getElementById('postsPerDay').value || 12),
+    posts_per_day_min: Number(document.getElementById('postsPerDay').value || 12),
+    posts_per_day_max: Number(document.getElementById('postsPerDay').value || 12),
+    allowed_hours_start: Number(document.getElementById('hoursStart').value || 8),
+    allowed_hours_end: Number(document.getElementById('hoursEnd').value || 23),
+    min_viral_score: Number(document.getElementById('minScore').value || 30),
+    hard_antiplagiat: true,
+    smart_24h_schedule: true,
+    exploitation_percent: 75
+  };
+}
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+}
+
+function renderReport(report) {
+  const summary = report.summary || {};
+  document.getElementById('candidateCount').textContent = summary.candidate_count || 0;
+  document.getElementById('scheduledCount').textContent = summary.scheduled_preview || 0;
+  document.getElementById('queueCountGa').textContent = summary.queue_files || 0;
+  document.getElementById('statusText').textContent = report.generated_at ? `Отчет: ${report.generated_at}` : '';
+
+  const checks = report.checks || [];
+  document.getElementById('checksList').innerHTML = checks.length ? checks.map(item =>
+    `<div class="ga-check"><span>${esc(item.name)} ${esc(item.value ?? '')}</span><b class="${item.ok ? 'ga-ok' : 'ga-stop'}">${item.ok ? 'OK' : 'STOP'}</b></div>`
+  ).join('') : '<div class="form-hint">Проверок пока нет</div>';
+
+  const candidates = report.top_candidates || [];
+  document.getElementById('candidatesBody').innerHTML = candidates.length ? candidates.slice(0, 30).map(item =>
+    `<tr><td><b>${esc(item.viral_score)}</b></td><td>${esc(item.source_id || '-')}</td><td>${esc(item.post_id || '-')}</td><td>${esc((item.reasons || []).join(', '))}</td><td>${esc(item.text_preview || '')}</td></tr>`
+  ).join('') : '<tr><td colspan="5" class="form-hint">No candidates</td></tr>';
+
+  const schedule = report.schedule_preview || [];
+  document.getElementById('scheduleList').innerHTML = schedule.length ? schedule.map(item => {
+    const source = item.schedule_source || 'slot';
+    return `<div class="ga-schedule-item"><b>${esc(item.publish_at)}</b> | ${esc(source)} | score ${esc(item.viral_score)} | post ${esc(item.post_id || item.file)}</div>`;
+  }).join('') : '<div class="form-hint">Plan is empty</div>';
+}
+
+async function loadStatus() {
+  const data = await api('/growth-autopilot/status');
+  if (data.settings) {
+    document.getElementById('sourceMode').value = data.settings.source_mode || 'single';
+    document.getElementById('singleSourceId').value = data.settings.single_source_id || '';
+    document.getElementById('horizonDays').value = data.settings.horizon_days || 2;
+    document.getElementById('postsPerDay').value = data.settings.posts_per_day || data.settings.posts_per_day_max || 12;
+    document.getElementById('hoursStart').value = data.settings.allowed_hours_start || 8;
+    document.getElementById('hoursEnd').value = data.settings.allowed_hours_end || 23;
+    document.getElementById('minScore').value = data.settings.min_viral_score || 30;
+  }
+  if (data.report && data.report.status) renderReport(data.report);
+}
+
+async function runGrowth() {
+  document.getElementById('statusText').textContent = 'Строю предварительный план...';
+  const data = await api('/growth-autopilot/cycle/dry-run', {
+    method: 'POST',
+    body: JSON.stringify({
+      settings: settingsFromForm()
+    })
+  });
+  if (data.status !== 'ok') {
+    document.getElementById('statusText').textContent = data.message || 'Ошибка';
+    return;
+  }
+  renderReport(data.report);
+}
+
+async function startCycle() {
+  document.getElementById('statusText').textContent = 'Запускаю цикл: скачивание и постановка постов в отложку...';
+  const data = await api('/growth-autopilot/cycle/start', {
+    method: 'POST',
+    body: JSON.stringify({settings: settingsFromForm()})
+  });
+  document.getElementById('statusText').textContent = data.message || (data.status === 'ok' ? 'Цикл запущен: посты будут поставлены в отложку' : 'Ошибка');
+}
+
+let lastRecommendationPatch = null;
+
+async function analyzeCycle() {
+  document.getElementById('statusText').textContent = 'Анализирую статистику...';
+  const data = await api('/growth-autopilot/analyze', {method: 'POST', body: '{}'});
+  if (data.status !== 'ok') {
+    document.getElementById('recommendationBlock').innerHTML = `<div class="form-hint">${esc(data.message || 'Ошибка анализа')}</div>`;
+    return;
+  }
+  const rec = data.recommendation || {};
+  const hotHours = (rec.hour_heatmap || [])
+    .filter(h => h.posts > 0)
+    .sort((a, b) => b.avg_score - a.avg_score)
+    .slice(0, 6)
+    .map(h => `${h.hour}:00`)
+    .join(', ') || 'testing';
+  lastRecommendationPatch = rec.patch || null;
+  document.getElementById('recommendationBlock').innerHTML = `
+    <div class="ga-check"><span>Постов в день</span><b>${esc(rec.posts_per_day || '-')}</b></div>
+    <div class="ga-check"><span>Лучшие часы</span><b>${esc((rec.hours || []).join(', '))}</b></div>
+    <div class="ga-check"><span>24/7 heatmap</span><b>${esc(hotHours)}</b></div>
+    <div class="form-hint">${esc(rec.reason || '')}</div>
+    <button class="btn btn-secondary" onclick="applyRecommendation()">Применить рекомендации</button>
+  `;
+  document.getElementById('statusText').textContent = 'Анализ готов';
+}
+
+async function applyRecommendation() {
+  if (!lastRecommendationPatch) return;
+  const data = await api('/growth-autopilot/apply-recommendation', {
+    method: 'POST',
+    body: JSON.stringify({patch: lastRecommendationPatch})
+  });
+  document.getElementById('statusText').textContent = data.message || 'Готово';
+}
+
+loadStatus();
+</script>
+</body>
+</html>

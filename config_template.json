@@ -21,13 +21,6 @@
     "add_hashtags": false,
     "hashtags": []
   },
-  "ollama": {
-    "enabled": false,
-    "url": "http://localhost:11434",
-    "model": "llama3.2:3b",
-    "target_words_min": 50,
-    "target_words_max": 80
-  },
   "filters": {
     "enable_auto_filters": false,
     "block_keywords": [],

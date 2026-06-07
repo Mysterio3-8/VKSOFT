@@ -17,8 +17,7 @@ async def photos_download_start():
     if app_state.is_downloading_photos:
         return {'status': 'error', 'message': 'Загрузка фото уже идёт'}
     profile = app_state.profile
-    if not profile.get('photos_settings', {}).get('enabled', False):
-        return {'status': 'error', 'message': 'Загрузка фото отключена в настройках'}
+    profile.setdefault('photos_settings', {})['enabled'] = True
     sources = [s for s in profile.get('sources', []) if s.get('enabled')]
     if not sources:
         return {'status': 'error', 'message': 'Нет активных источников'}

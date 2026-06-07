@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Анализ ниш — VK Post Bot</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .niche-page { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .niche-header { margin-bottom: 24px; }
+    .niche-header h2 { font-size: 1.4rem; font-weight: 600; margin-bottom: 6px; }
+    .niche-header p { color: var(--text-secondary, #888); font-size: 0.9rem; }
+    .niche-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+    .niche-controls input { flex: 1; min-width: 200px; padding: 8px 12px; border: 1px solid var(--border, #333); border-radius: 8px; background: var(--card-bg, #1a1a1a); color: inherit; font-size: 0.95rem; }
+    .progress-bar-wrap { background: var(--border, #333); border-radius: 6px; height: 8px; margin-bottom: 16px; overflow: hidden; }
+    .progress-bar-fill { height: 100%; background: var(--accent, #7c3aed); border-radius: 6px; transition: width 0.4s; }
+    .progress-label { font-size: 0.85rem; color: var(--text-secondary, #888); margin-bottom: 12px; }
+    .niche-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .niche-table th { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); color: var(--text-secondary, #888); font-weight: 500; }
+    .niche-table td { padding: 10px 12px; border-bottom: 1px solid var(--border, #222); vertical-align: top; }
+    .niche-table tr:hover td { background: var(--hover, #222); }
+    .score-badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; background: var(--accent, #7c3aed); color: #fff; }
+    .score-high { background: #16a34a; }
+    .score-mid  { background: #b45309; }
+    .score-low  { background: #6b7280; }
+    .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary, #888); text-decoration: none; font-size: 0.9rem; margin-bottom: 20px; }
+    .back-link:hover { color: inherit; }
+    #statusMsg { font-size: 0.9rem; color: var(--text-secondary, #888); margin-bottom: 12px; min-height: 20px; }
+  </style>
+</head>
+<body>
+<div class="niche-page">
+  <a class="back-link" href="/">← Назад</a>
+
+  <div class="niche-header">
+    <h2>Анализ ниш VK</h2>
+    <p>Находит популярные сообщества, считает скор вовлечённости и помогает выбрать нишу для канала.</p>
+  </div>
+
+  <div class="niche-controls">
+    <input type="text" id="keywordsInput" placeholder="Ниши через запятую: фитнес, юмор, авто…">
+    <button class="btn btn-primary" onclick="startScan(false)">🔍 Найти по ключевым словам</button>
+    <button class="btn btn-secondary" onclick="startScan(true)">⚡ Авто-обзор топ-ниш</button>
+  </div>
+
+  <div id="progressSection" style="display:none">
+    <div class="progress-label" id="progressLabel">Анализирую…</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar-fill" id="progressFill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <div id="statusMsg"></div>
+
+  <div id="resultsSection" style="display:none">
+    <table class="niche-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Ниша</th>
+          <th>Сообществ</th>
+          <th>Ср. подписчики</th>
+          <th>Ср. лайки/пост</th>
+          <th>Скор ниши</th>
+          <th>Действие</th>
+        </tr>
+      </thead>
+      <tbody id="nicheTableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let pollTimer = null;
+
+async function startScan(auto) {
+  const keywords = document.getElementById('keywordsInput').value
+    .split(',').map(k => k.trim()).filter(Boolean);
+
+  if (!auto && keywords.length === 0) {
+    setStatus('Введите хотя бы одну нишу или нажмите «Авто-обзор»');
+    return;
+  }
+
+  setStatus('Запускаю анализ…');
+  document.getElementById('resultsSection').style.display = 'none';
+  document.getElementById('progressSection').style.display = 'block';
+  setProgress(0, 'Запуск…');
+
+  try {
+    const res = await fetch('/api/niche/scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({auto, keywords}),
+    });
+    const data = await res.json();
+    if (data.status !== 'started') {
+      setStatus('Ошибка: ' + data.message);
+      document.getElementById('progressSection').style.display = 'none';
+      return;
+    }
+    setStatus('');
+    startPolling();
+  } catch (e) {
+    setStatus('Сетевая ошибка: ' + e.message);
+    document.getElementById('progressSection').style.display = 'none';
+  }
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(fetchResults, 1500);
+}
+
+async function fetchResults() {
+  try {
+    const res = await fetch('/api/niche/results');
+    const data = await res.json();
+
+    if (data.status === 'running') {
+      const label = data.current_keyword
+        ? `Анализирую: ${data.current_keyword}… (${data.progress}%)`
+        : `Анализирую… (${data.progress}%)`;
+      setProgress(data.progress, label);
+      return;
+    }
+
+    clearInterval(pollTimer);
+    pollTimer = null;
+    document.getElementById('progressSection').style.display = 'none';
+
+    if (data.status === 'done' && data.results.length > 0) {
+      renderResults(data.results);
+    } else if (data.status === 'idle') {
+      setStatus('Нет результатов. Запустите анализ.');
+    }
+  } catch (e) {
+    clearInterval(pollTimer);
+    setStatus('Ошибка получения результатов: ' + e.message);
+  }
+}
+
+function renderResults(results) {
+  const tbody = document.getElementById('nicheTableBody');
+  tbody.innerHTML = '';
+
+  results.forEach((niche, idx) => {
+    const score = niche.avg_score;
+    const scoreClass = score >= 60 ? 'score-high' : score >= 30 ? 'score-mid' : 'score-low';
+    const top = niche.top_community;
+    const avgMembers = top ? Math.round(top.members / 1000) + 'к' : '—';
+    const avgLikes = top ? top.avg_likes : '—';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${idx + 1}</td>
+      <td><strong>${niche.keyword}</strong></td>
+      <td>${niche.count}</td>
+      <td>${avgMembers}</td>
+      <td>${avgLikes}</td>
+      <td><span class="score-badge ${scoreClass}">${score}</span></td>
+      <td>${top
+        ? `<button class="btn btn-sm btn-secondary" onclick="addSource('${top.id}','${escHtml(top.name)}')">+ Добавить</button>`
+        : '—'
+      }</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('resultsSection').style.display = 'block';
+  setStatus(`Найдено ${results.length} ниш. Нажмите «+ Добавить» чтобы добавить топ-сообщество как источник.`);
+}
+
+async function addSource(communityId, name) {
+  try {
+    const res = await fetch('/api/niche/add-source', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({community_id: communityId, name}),
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      setStatus(`✅ Источник «${name}» добавлен!`);
+    } else {
+      setStatus('⚠️ ' + data.message);
+    }
+  } catch (e) {
+    setStatus('Ошибка: ' + e.message);
+  }
+}
+
+function setProgress(pct, label) {
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = label;
+}
+
+function setStatus(msg) {
+  document.getElementById('statusMsg').textContent = msg;
+}
+
+function escHtml(str) {
+  return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+fetchResults();
+</script>
+</body>
+</html>

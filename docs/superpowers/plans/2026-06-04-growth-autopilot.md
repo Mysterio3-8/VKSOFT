@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a separate Growth Autopilot page and read-only/dry-run backend that can score VK post candidates, avoid global duplicates, propose schedules, and show donor cards without changing the existing production download/publish flow.
+**Goal:** Build a separate Growth Autopilot page and read-only/dry-run backend that can score VK post candidates, avoid global duplicates, and propose schedules without changing the existing production download/publish flow.
 
 **Architecture:** Add a focused `services/growth_autopilot.py` module for pure logic and storage-backed reports, an `api/growth_autopilot.py` router for UI calls, and a standalone `frontend/growth-autopilot.html` page. Register the route in `main.py` and add one sidebar link in `frontend/index.html`; existing `/download`, `/publish`, `/autopilot`, and `/growth` behavior remains untouched.
 
@@ -12,9 +12,9 @@
 
 ## File Structure
 
-- Create `services/growth_autopilot.py`: pure scoring, settings defaults, report building, anti-duplicate helpers, donor card shaping, and storage helpers.
-- Create `api/growth_autopilot.py`: FastAPI endpoints for status, dry-run/read-only run, donor discovery, and adding a donor.
-- Create `frontend/growth-autopilot.html`: separate page with simple mode, expert settings, status cards, candidate table, and donor cards.
+- Create `services/growth_autopilot.py`: pure scoring, settings defaults, report building, anti-duplicate helpers, and storage helpers.
+- Create `api/growth_autopilot.py`: FastAPI endpoints for status and dry-run/read-only run.
+- Create `frontend/growth-autopilot.html`: separate page with simple mode, expert settings, status cards, and candidate table.
 - Modify `main.py`: include the new API router and serve `/growth-autopilot`.
 - Modify `frontend/index.html`: add a sidebar link to the separate Growth Autopilot page.
 - Create `tests/test_growth_autopilot.py`: unit tests for scoring, scheduling, anti-duplicates, and report behavior.
@@ -151,7 +151,7 @@ DEFAULT_GROWTH_SETTINGS = {
     "postponed_limit": 140,
     "min_viral_score": 30,
     "global_dedup": True,
-    "ollama_enabled": False,
+    
     "run_mode": "dry_run",
     "shortage_strategy": "improve_then_reduce",
 }
@@ -493,7 +493,6 @@ def build_readonly_report(
         "checks": build_technical_checks(),
         "top_candidates": candidates[:50],
         "schedule_preview": schedule,
-        "donor_cards": [],
     }
     save_report(report)
     return report
@@ -670,7 +669,6 @@ Create `frontend/growth-autopilot.html`:
             <select class="form-input" id="sourceMode">
               <option value="single">Один источник</option>
               <option value="approved">Одобренные источники</option>
-              <option value="discover">Найти доноров</option>
             </select>
           </div>
           <div class="form-group">
@@ -887,13 +885,12 @@ Spec coverage:
 - Separate page: Task 4.
 - Do not break production flow: Tasks 3 and 4 only register new route/link; no existing download/publish logic is changed.
 - One source or approved sources: settings and page fields in Tasks 1 and 4; first implementation reads local queue, queue/live remains out of first safe slice.
-- Auto-discovery donor cards: planned as UI section, not implemented in the first safe read-only slice.
 - Global anti-duplicate: Task 2.
 - Adjustable tempo and 24/day as preset: Task 1 and Task 4.
 - Metrics learning: not implemented in this first read-only/dry-run slice; existing `services.tracker` remains available for a later task.
-- Ollama optional: settings field present, no automatic AI calls.
+- External models are not used; recommendations are algorithmic.
 
 Intentional first-slice gaps:
 - Queue/live mutation is not implemented to protect production.
-- Donor discovery API is not implemented in this first pass; the page and service boundaries leave room for it.
 - Growth metric learning is not implemented in this first pass; no existing tracker behavior is changed.
+

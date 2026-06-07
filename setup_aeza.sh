@@ -1,7 +1,6 @@
 #!/bin/bash
 # ============================================================
-#  VK Post Bot + Ollama — Setup Script for Aeza VPS (Ubuntu)
-#  RAM requirement: 4 GB minimum (for llama3.2:3b)
+#  VK Post Bot — Setup Script for Aeza VPS (Ubuntu)
 #  Run as root: bash setup_aeza.sh
 # ============================================================
 
@@ -18,7 +17,7 @@ BOT_USER="vkbot"
 
 echo -e "${BLUE}"
 echo "  ============================================"
-echo "   VK Post Bot + Ollama — Auto Setup"
+echo "   VK Post Bot — Auto Setup"
 echo "  ============================================"
 echo -e "${NC}"
 
@@ -64,40 +63,13 @@ sudo -u "$BOT_USER" bash -c "
 success "Python зависимости установлены"
 
 # ============================================================
-# 5. Install Ollama
-# ============================================================
-if ! command -v ollama &>/dev/null; then
-    info "Устанавливаю Ollama..."
-    curl -fsSL https://ollama.com/install.sh | sh
-    success "Ollama установлена"
-else
-    warn "Ollama уже установлена: $(ollama --version 2>/dev/null || echo 'version unknown')"
-fi
-
-# ============================================================
-# 6. Start Ollama service & pull model
-# ============================================================
-info "Запускаю Ollama сервис..."
-systemctl enable ollama 2>/dev/null || true
-systemctl start ollama 2>/dev/null || true
-
-info "Жду запуска Ollama (10 сек)..."
-sleep 10
-
-MODEL="llama3.2:3b"
-info "Скачиваю модель $MODEL (может занять несколько минут)..."
-ollama pull "$MODEL" || warn "Не удалось скачать модель — сделай это вручную: ollama pull $MODEL"
-success "Модель $MODEL готова"
-
-# ============================================================
-# 7. Systemd service for VK Bot
+# 5. Systemd service for VK Bot
 # ============================================================
 info "Создаю systemd сервис vk-bot..."
 cat > /etc/systemd/system/vk-bot.service << EOF
 [Unit]
 Description=VK Post Reposting Bot
-After=network.target ollama.service
-Wants=ollama.service
+After=network.target
 
 [Service]
 Type=simple
@@ -121,7 +93,7 @@ systemctl start vk-bot
 success "Сервис vk-bot запущен"
 
 # ============================================================
-# 8. Configure firewall (ufw)
+# 6. Configure firewall (ufw)
 # ============================================================
 if command -v ufw &>/dev/null; then
     info "Настраиваю фаервол..."
@@ -134,7 +106,7 @@ else
 fi
 
 # ============================================================
-# 9. Summary
+# 7. Summary
 # ============================================================
 SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
@@ -144,8 +116,6 @@ echo -e "${GREEN}  Установка завершена!${NC}"
 echo -e "${GREEN}============================================${NC}"
 echo ""
 echo -e "  Веб-интерфейс бота:  ${YELLOW}http://$SERVER_IP:8000${NC}"
-echo -e "  Ollama API:          http://127.0.0.1:11434"
-echo -e "  Модель:              $MODEL"
 echo ""
 echo -e "  Управление сервисом:"
 echo -e "    systemctl status vk-bot      — статус"
@@ -154,7 +124,4 @@ echo -e "    journalctl -u vk-bot -f      — логи в реальном вр�
 echo ""
 echo -e "  Файлы бота:  ${YELLOW}$BOT_DIR${NC}"
 echo -e "  Конфиг:      ${YELLOW}$BOT_DIR/config.json${NC}"
-echo ""
-echo -e "${YELLOW}  В настройках Ollama в боте укажи URL:${NC}"
-echo -e "  ${GREEN}http://127.0.0.1:11434${NC}"
 echo ""

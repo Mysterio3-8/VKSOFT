@@ -33,9 +33,11 @@ async def lifespan(app: FastAPI):
     import threading
     from workers.monitor import _watchdog_loop
     from services.tracker import tracker_loop
+    from services.cleanup_storage import cleanup_loop
     from workers.growth_tasks import subscriber_tracker_loop
     threading.Thread(target=_watchdog_loop, daemon=True, name='watchdog').start()
     threading.Thread(target=tracker_loop, daemon=True, name='tracker').start()
+    threading.Thread(target=cleanup_loop, daemon=True, name='cleanup').start()
     threading.Thread(target=subscriber_tracker_loop, daemon=True, name='sub_tracker').start()
     app_state.add_log('VK Post Bot запущен ✅', 'info')
     yield
@@ -91,6 +93,9 @@ from api.growth import router as growth_router
 from api.media import router as media_router
 from api.library import router as library_router
 from api.growth_extra import router as growth_extra_router
+from api.autopilot import router as autopilot_router
+from api.tokens import router as tokens_router
+from api.growth_autopilot import router as growth_autopilot_router
 
 app.include_router(profiles_router, prefix='/api')
 app.include_router(monitor_router, prefix='/api')
@@ -107,6 +112,21 @@ app.include_router(growth_router, prefix='/api')
 app.include_router(media_router,   prefix='/api')
 app.include_router(library_router,      prefix='/api')
 app.include_router(growth_extra_router, prefix='/api')
+app.include_router(autopilot_router, prefix='/api')
+app.include_router(tokens_router, prefix='/api')
+app.include_router(growth_autopilot_router, prefix='/api')
+from api.niche_analyzer import router as niche_router
+app.include_router(niche_router, prefix='/api')
+
+
+@app.get('/niche')
+async def niche_page():
+    return FileResponse(FRONTEND_DIR / 'niche.html')
+
+
+@app.get('/growth-autopilot')
+async def growth_autopilot_page():
+    return FileResponse(FRONTEND_DIR / 'growth-autopilot.html')
 
 
 # ── Main ─────────────────────────────────────────────────────────

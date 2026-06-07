@@ -337,11 +337,14 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                 att = f'video{vid_owner}_{vid_id}'
 
                 if create_wall:
-                    from services.content_library import get_random_caption
-                    tags = ' '.join(profile.get('processing', {}).get('hashtags', []))
-                    text = get_random_caption('', add_tags=True)
-                    if not text and tags:
-                        text = tags
+                    from services.content_library import compose_caption
+                    processing = profile.get('processing', {})
+                    text = compose_caption(
+                        '',
+                        add_tags=True,
+                        profile_tags=processing.get('hashtags', []),
+                        add_profile_tags=processing.get('add_hashtags', False),
+                    )
 
                     now = int(time.time())
                     if next_ts <= now:
@@ -379,6 +382,15 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                 failed += 1
 
         app_state.add_log(f'{label}: {published} опубликовано, {failed} ошибок', 'info')
+        if published > 0 and profile.get('storage_cleanup', {}).get('clean_orphans_after_run', True):
+            try:
+                from services.cleanup_storage import cleanup_junk
+                junk = cleanup_junk()
+                removed = sum(int(v or 0) for v in junk.values())
+                if removed:
+                    app_state.add_log(f'{label} автоочистка: удалено {removed} остаточных файлов/папок', 'info')
+            except Exception as e:
+                app_state.add_log(f'{label} автоочистка: {e}', 'warning')
 
     except Exception as e:
         app_state.add_log(f'{label} публикация критическая ошибка: {e}', 'error')

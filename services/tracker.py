@@ -4,6 +4,7 @@
 import json
 import time
 import threading
+from datetime import datetime
 from pathlib import Path
 from config import app_state, STORAGE_DIR, logger
 
@@ -33,14 +34,14 @@ def _save(data: list):
         logger.warning(f'tracker _save: {e}')
 
 
-def track(vk_post_id: int, owner_id: str, source_cid: str = ''):
+def track(vk_post_id: int, owner_id: str, source_cid: str = '', published_at: int | None = None):
     """Зарегистрировать пост сразу после публикации."""
     data = _load()
     data.append({
         'post_id': vk_post_id,
         'owner_id': owner_id,
         'source_cid': source_cid,
-        'published_at': int(time.time()),
+        'published_at': int(published_at or time.time()),
         'checked': False,
         'likes': 0,
         'views': 0,
@@ -53,20 +54,76 @@ def get_all() -> list:
     return _load()
 
 
+def build_hour_heatmap(data: list) -> list:
+    buckets = {
+        hour: {'hour': hour, 'posts': 0, 'views': 0, 'likes': 0, 'reposts': 0, 'score': 0}
+        for hour in range(24)
+    }
+    for post in data:
+        if not post.get('checked'):
+            continue
+        published_at = post.get('published_at')
+        if not published_at:
+            continue
+        hour = datetime.fromtimestamp(int(published_at)).hour
+        views = int(post.get('views', 0) or 0)
+        likes = int(post.get('likes', 0) or 0)
+        reposts = int(post.get('reposts', 0) or 0)
+        score = views + likes * 10 + reposts * 25
+        bucket = buckets[hour]
+        bucket['posts'] += 1
+        bucket['views'] += views
+        bucket['likes'] += likes
+        bucket['reposts'] += reposts
+        bucket['score'] += score
+
+    result = []
+    for hour in range(24):
+        bucket = buckets[hour]
+        posts = max(bucket['posts'], 1)
+        result.append({
+            **bucket,
+            'avg_views': round(bucket['views'] / posts),
+            'avg_likes': round(bucket['likes'] / posts, 2),
+            'avg_reposts': round(bucket['reposts'] / posts, 2),
+            'avg_score': round(bucket['score'] / posts, 2),
+        })
+    return result
+
+
 def get_summary() -> dict:
     data = _load()
     checked = [p for p in data if p.get('checked')]
+    heatmap = build_hour_heatmap(data)
     if not checked:
-        return {'total': len(data), 'checked': 0, 'avg_views': 0, 'avg_likes': 0, 'top': []}
+        return {
+            'total': len(data),
+            'checked': 0,
+            'avg_views': 0,
+            'avg_likes': 0,
+            'top': [],
+            'hour_heatmap': heatmap,
+            'recommended_hours': app_state.profile.get('peak_hours', {}).get('hours', []),
+        }
     avg_views = round(sum(p['views'] for p in checked) / len(checked))
     avg_likes = round(sum(p['likes'] for p in checked) / len(checked))
     top = sorted(checked, key=lambda p: p.get('likes', 0), reverse=True)[:5]
+    recommended_hours = [
+        item['hour']
+        for item in sorted(
+            [item for item in heatmap if item['posts'] > 0],
+            key=lambda x: (x['avg_score'], x['posts']),
+            reverse=True
+        )[:6]
+    ] or app_state.profile.get('peak_hours', {}).get('hours', [])
     return {
         'total': len(data),
         'checked': len(checked),
         'avg_views': avg_views,
         'avg_likes': avg_likes,
         'top': top,
+        'hour_heatmap': heatmap,
+        'recommended_hours': recommended_hours,
     }
 
 

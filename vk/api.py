@@ -13,6 +13,15 @@ VK_RETRY_CODES = {1, 6, 9, 10}  # unknown, too many requests, flood control, int
 NETWORK_ERRORS = (ReqConnectionError, ReqTimeout)
 
 VK_POSTPONED_LIMIT = 150
+DEFAULT_AD_STOP_KEYWORDS = (
+    'реклама', '#реклама', 'рекламный', 'на правах рекламы', 'erid',
+    'купить', 'заказать', 'скидка', 'акция', 'промокод', 'распродажа',
+    'цена', 'доставка', 'оплата', 'в наличии', 'оформить заказ',
+    'пиши в лс', 'пишите в лс', 'подробнее в лс', 'ссылка в описании',
+    'перейти на сайт', 'whatsapp', 'ватсап', 'telegram', 'телеграм',
+    'казино', 'ставки', 'букмекер', 'заработок',
+    'проверить цену', 'проверить наличие',
+)
 
 
 def get_postponed_count(vk, owner_id: str) -> int:
@@ -71,18 +80,36 @@ def normalize_owner_id(community_id: str) -> str:
     return f'-{str(community_id).strip().lstrip("-")}'
 
 
+def _filter_text(value: str) -> str:
+    return ' '.join((value or '').lower().replace('ё', 'е').split())
+
+
+def post_matches_ad_stopper(text: str, filters: dict) -> bool:
+    tl = _filter_text(text)
+    if not tl:
+        return False
+    keywords = filters.get('ad_stop_keywords') or DEFAULT_AD_STOP_KEYWORDS
+    for kw in keywords:
+        marker = _filter_text(str(kw))
+        if marker and marker in tl:
+            return True
+    return False
+
+
 def post_passes_filters(text: str, profile: dict) -> bool:
     f = profile.get('filters', {})
+    if f.get('ad_stopper_enabled', True) and post_matches_ad_stopper(text, f):
+        return False
     if not f.get('enable_auto_filters'):
         return True
     if f.get('min_content_length', 0) and len(text) < f['min_content_length']:
         return False
-    tl = text.lower()
+    tl = _filter_text(text)
     for kw in f.get('block_keywords', []):
-        if kw.lower() in tl:
+        if _filter_text(str(kw)) in tl:
             return False
     for tag in f.get('block_hashtags', []):
-        if tag.lower() in tl:
+        if _filter_text(str(tag)) in tl:
             return False
     return True
 

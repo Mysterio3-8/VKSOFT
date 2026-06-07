@@ -31,6 +31,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+SENSITIVE_CONFIG_KEYS = {
+    'user_token',
+    'group_token',
+    'access_token',
+    'token',
+    'api_key',
+    'google_api_key',
+    'google_cx',
+}
+
+MOJIBAKE_MARKERS = ('Р', 'С', 'Ð', 'Ñ', 'вЂ', 'В«', 'В»', 'рџ')
+
+
 class AppState:
     """Состояние приложения."""
 
@@ -39,6 +52,10 @@ class AppState:
         self.is_downloading = False
         self.is_publishing = False
         self.is_monitoring = False
+        self.is_autopilot = False
+        self.is_niche_scanning = False
+        self.niche_progress: Dict = {'current': 0, 'total': 0, 'keyword': ''}
+        self.niche_results: List[Dict] = []
         self.is_downloading_photos = False
         self.is_publishing_photos  = False
         self.is_downloading_videos = False
@@ -46,6 +63,8 @@ class AppState:
         self.is_downloading_clips  = False
         self.is_publishing_clips   = False
         self._monitor_thread: Optional[threading.Thread] = None
+        self._autopilot_thread: Optional[threading.Thread] = None
+        self.autopilot_last_report: Dict = {}
         self.monitor_last_check: Optional[str] = None
         self.monitor_next_check: Optional[str] = None
         self.monitor_log: List[Dict] = []
@@ -66,7 +85,14 @@ class AppState:
     @property
     def profile(self) -> Dict:
         """Return active profile config dict."""
-        return self.config['profiles'].get(self.active_profile_id, {})
+        profiles = self.config.setdefault('profiles', {})
+        if self.active_profile_id not in profiles:
+            if profiles:
+                self.active_profile_id = next(iter(profiles))
+            else:
+                profiles['p1'] = self.default_profile()
+                self.active_profile_id = 'p1'
+        return profiles.get(self.active_profile_id, {})
 
     @property
     def posts_dir(self) -> Path:
@@ -178,15 +204,29 @@ class AppState:
                 'photo_only': False,
                 'allow_video': False,
             },
-            'ollama': {
+            'watermark': {
                 'enabled': False,
-                'url': 'http://localhost:11434',
-                'model': 'llama3.2:3b',
-                'target_words_min': 50,
-                'target_words_max': 80,
+                'mode': 'text',        # 'text' или 'logo'
+                'text': '@channel',
+                'logo_path': '',
+                'position': 'bottom_right',
+                'font_size': 0,        # 0 = авто
+                'opacity': 180,
+                'color': [255, 255, 255],
+                'logo_scale': 0.12,
             },
             'filters': {
                 'enable_auto_filters': False,
+                'ad_stopper_enabled': True,
+                'ad_stop_keywords': [
+                    'реклама', '#реклама', 'на правах рекламы', 'erid',
+                    'купить', 'заказать', 'скидка', 'акция', 'промокод',
+                    'цена', 'доставка', 'оплата', 'в наличии',
+                    'пиши в лс', 'пишите в лс', 'перейти на сайт',
+                    'whatsapp', 'ватсап', 'telegram', 'телеграм',
+                    'казино', 'ставки', 'заработок',
+                    'проверить цену', 'проверить наличие',
+                ],
                 'block_keywords': [],
                 'block_hashtags': [],
                 'min_content_length': 0,
@@ -218,12 +258,40 @@ class AppState:
                 'enabled': True,
                 'hours': [8, 10, 13, 17, 19, 21],
             },
+            'autopilot': {
+                'enabled': False,
+                'dry_run': True,
+                'live_enabled': False,
+                'cycle_interval_min': 180,
+                'target_queue_days': 5,
+                'daily_posts_min': 4,
+                'daily_posts_max': 8,
+                'posts_per_source': 35,
+                'max_sources_per_cycle': 5,
+                'min_candidate_score': 30,
+            },
+            'token_manager': {
+                'last_check': '',
+                'last_error': '',
+                'warn_before_hours': 24,
+                'user_expires_at': 0,
+                'group_expires_at': 0,
+            },
+            'storage_cleanup': {
+                'after_publish_success': True,
+                'clean_orphans_after_run': True,
+                'keep_failed_posts': True,
+                'background_enabled': True,
+                'background_interval_hours': 12,
+                'auto_clean_temp': True,
+                'auto_clean_orphans': True,
+            },
             'cross_post': {
                 'enabled': False,
                 'profile_ids': [],
             },
             'recycle': {
-                'enabled': False,
+                'enabled': True,
                 'min_days': 30,
                 'min_likes': 50,
                 'max_per_run': 5,
@@ -237,7 +305,7 @@ class AppState:
                 'alert_low_views': False,
             },
             'photos_settings': {
-                'enabled': False,
+                'enabled': True,
                 'photos_per_run': 50,
                 'publish_delay_min': 7200,
                 'publish_delay_max': 10800,
@@ -247,7 +315,7 @@ class AppState:
                 'create_wall_post': True,
             },
             'videos_settings': {
-                'enabled': False,
+                'enabled': True,
                 'videos_per_run': 10,
                 'publish_delay_min': 10800,
                 'publish_delay_max': 21600,
@@ -258,7 +326,7 @@ class AppState:
                 'max_filesize_mb': 500,
             },
             'clips_settings': {
-                'enabled': False,
+                'enabled': True,
                 'clips_per_run': 10,
                 'publish_delay_min': 10800,
                 'publish_delay_max': 21600,
@@ -307,6 +375,65 @@ class AppState:
                 result[k] = v
         return result
 
+    @staticmethod
+    def _looks_mojibake(value: str) -> bool:
+        return isinstance(value, str) and any(marker in value for marker in MOJIBAKE_MARKERS)
+
+    @staticmethod
+    def _repair_string(value: str) -> str:
+        if not AppState._looks_mojibake(value):
+            return value
+        try:
+            repaired = value.encode('cp1251').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return value
+
+        old_score = sum(value.count(marker) for marker in MOJIBAKE_MARKERS)
+        new_score = sum(repaired.count(marker) for marker in MOJIBAKE_MARKERS)
+        return repaired if new_score < old_score else value
+
+    def _repair_human_text(self, value, key: str = ''):
+        if isinstance(value, dict):
+            return {
+                k: (v if k in SENSITIVE_CONFIG_KEYS else self._repair_human_text(v, k))
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [self._repair_human_text(item, key) for item in value]
+        if isinstance(value, str) and key not in SENSITIVE_CONFIG_KEYS:
+            return self._repair_string(value)
+        return value
+
+    def _normalize_config(self, raw: Dict) -> Dict:
+        if 'profiles' not in raw:
+            raw = self._migrate_old_config(raw)
+
+        profiles = {}
+        for pid, prof in raw.get('profiles', {}).items():
+            if not isinstance(prof, dict):
+                continue
+            merged = self._deep_merge(
+                self.default_profile(pid, prof.get('name') or pid),
+                prof
+            )
+            merged['id'] = pid
+            merged.setdefault('vk', {})['api_version'] = '5.131'
+            for legacy_external_model_key in ('ol' + 'lama', 'ge' + 'mini'):
+                merged.pop(legacy_external_model_key, None)
+            profiles[pid] = merged
+
+        if not profiles:
+            profiles['p1'] = self.default_profile()
+
+        active = raw.get('active_profile')
+        if active not in profiles:
+            active = next(iter(profiles))
+
+        return self._repair_human_text({
+            'active_profile': active,
+            'profiles': profiles,
+        })
+
     def _migrate_old_config(self, old: Dict) -> Dict:
         """Convert flat (pre-profile) config.json to new schema."""
         pid = 'p1'
@@ -319,20 +446,18 @@ class AppState:
         return {'active_profile': pid, 'profiles': {pid: prof}}
 
     def _load_config(self) -> Dict:
-        default = self.default_config()
         if not CONFIG_FILE.exists():
-            return default
+            return self._normalize_config(self.default_config())
         try:
             raw = json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
-            if 'profiles' not in raw:
-                raw = self._migrate_old_config(raw)
-            return self._deep_merge(default, raw)
+            return self._normalize_config(raw)
         except Exception as e:
             logger.error(f'Config load error: {e}')
-            return default
+            return self._normalize_config(self.default_config())
 
     def save_config(self) -> bool:
         try:
+            self.config = self._normalize_config(self.config)
             CONFIG_FILE.write_text(
                 json.dumps(self.config, ensure_ascii=False, indent=2),
                 encoding='utf-8'
@@ -387,6 +512,7 @@ class AppState:
     # ── logs ──────────────────────────────────────────────────
 
     def add_log(self, message: str, level: str = 'info'):
+        message = self._repair_string(str(message))
         ts = datetime.now().strftime('%H:%M:%S')
         with self._lock:
             self.logs.insert(0, {'timestamp': ts, 'message': message, 'level': level})
@@ -399,6 +525,7 @@ class AppState:
 
     def add_monitor_log(self, message: str, level: str = 'info'):
         """Лог мониторинга."""
+        message = self._repair_string(str(message))
         ts = datetime.now().strftime('%H:%M:%S')
         entry = {'timestamp': ts, 'message': message, 'level': level}
         with self._lock:

@@ -16,22 +16,32 @@ async def list_profiles():
     for pid, p in profiles.items():
         pending = len(list((STORAGE_DIR / pid / 'downloaded_posts').glob('*.json'))) \
                   if (STORAGE_DIR / pid / 'downloaded_posts').exists() else 0
-        result.append({**p, 'active': pid == active, 'pending': pending})
+        vk = p.get('vk', {})
+        result.append({
+            **p,
+            'group_id': vk.get('group_id', ''),
+            'active': pid == active,
+            'pending': pending,
+        })
     return {'profiles': result, 'active': active}
 
 
 @router.post('/profiles/create')
 async def create_profile(data: dict):
     name = data.get('name', '').strip()
-    color = data.get('color', '#7c3aed')
+    group_id = str(data.get('group_id') or data.get('channel_id') or '').strip().lstrip('-')
     if not name:
         return {'status': 'error', 'message': 'Укажи название канала'}
+    if not group_id:
+        return {'status': 'error', 'message': 'Укажи ID канала'}
     import uuid
     pid = f'p{uuid.uuid4().hex[:6]}'
     from config import AppState
     prof = AppState.default_profile(pid, name)
-    prof['color'] = color
+    prof['vk']['group_id'] = group_id
+    prof['vk']['api_version'] = '5.131'
     app_state.config.setdefault('profiles', {})[pid] = prof
+    app_state.active_profile_id = pid
     app_state.save_config()
     app_state.add_log(f'Канал создан: {name}', 'info')
     return {'status': 'ok', 'profile': prof}
@@ -56,7 +66,20 @@ async def update_profile(data: dict):
     profiles = app_state.config.get('profiles', {})
     if pid not in profiles:
         return {'status': 'error', 'message': 'Профиль не найден'}
-    profiles[pid] = app_state._deep_merge(profiles[pid], data)
+    updates = {}
+    if 'name' in data:
+        updates['name'] = str(data.get('name', '')).strip() or profiles[pid].get('name', pid)
+    if 'group_id' in data or 'channel_id' in data:
+        group_id = str(data.get('group_id') or data.get('channel_id') or '').strip().lstrip('-')
+        if not group_id:
+            return {'status': 'error', 'message': 'Укажи ID канала'}
+        updates.setdefault('vk', {})['group_id'] = group_id
+    if 'vk' in data:
+        vk_updates = dict(data.get('vk') or {})
+        vk_updates['api_version'] = '5.131'
+        updates['vk'] = app_state._deep_merge(updates.get('vk', {}), vk_updates)
+    profiles[pid] = app_state._deep_merge(profiles[pid], updates or data)
+    profiles[pid].setdefault('vk', {})['api_version'] = '5.131'
     app_state.save_config()
     app_state.add_log('Настройки канала сохранены', 'info')
     return {'status': 'ok'}
