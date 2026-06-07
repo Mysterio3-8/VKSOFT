@@ -490,6 +490,9 @@ textarea.form-input { resize: vertical; min-height: 80px; }
 .log-level.warning { background: var(--warning-bg); color: var(--warning); }
 .log-level.error   { background: var(--error-bg);   color: var(--error); }
 .log-message { color: var(--text-2); }
+.log-filter-btn { font-size: 11px; padding: 2px 8px; border-radius: 12px; transition: background 0.15s; }
+.log-filter-btn.active { background: var(--accent); color: #fff; }
+.log-filter-btn:not(.active):hover { background: var(--bg-3); }
 
 .channel-card {
   background: var(--surface); border: 1px solid var(--border);

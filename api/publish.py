@@ -117,3 +117,100 @@ async def fetch_scheduled_vk():
         return {'status': 'warning', 'message': 'Отложенных постов не найдено'}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
+
+
+@router.post('/publish/fill_slots')
+async def find_fill_slots():
+    """Найти пустые слоты в очереди VK и вернуть их список для подтверждения."""
+    try:
+        from vk.api import get_vk_api
+        from services.engagement import load_engagement_model
+        from services.slot_finder import fetch_postponed_timestamps, find_empty_slots
+
+        profile = app_state.profile
+        vk_cfg = profile.get('vk', {})
+        gt = vk_cfg.get('group_token', '').strip()
+        gid = vk_cfg.get('group_id', '').strip()
+        if not gt or not gid:
+            return {'status': 'error', 'message': 'Group Token и Group ID не заданы'}
+
+        pending = len(list(app_state.posts_dir.glob('*.json')))
+        if pending == 0:
+            return {'status': 'error', 'message': 'Нет постов в очереди для заполнения слотов'}
+
+        vk = get_vk_api(gt, vk_cfg.get('api_version', '5.131'))
+        model = load_engagement_model(app_state.active_profile_id)
+        occupied = fetch_postponed_timestamps(vk, gid)
+        slots = find_empty_slots(occupied, profile, model, max_slots=min(pending, 30))
+
+        if not slots:
+            return {'status': 'ok', 'slots': [], 'message': 'Свободных слотов не найдено — очередь заполнена'}
+
+        app_state.add_log(f'[Слоты] Найдено {len(slots)} пустых слотов', 'info')
+        return {'status': 'ok', 'slots': slots, 'message': f'Найдено {len(slots)} слотов'}
+    except Exception as e:
+        app_state.add_log(f'[Слоты] Ошибка поиска: {e}', 'error')
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.post('/publish/fill_slots_apply')
+async def apply_fill_slots(data: dict):
+    """Опубликовать посты из очереди в переданные слоты."""
+    try:
+        import threading
+        from vk.api import get_vk_api
+        from services.slot_finder import fill_slots_with_queue
+
+        slots = data.get('slots', [])
+        if not slots:
+            return {'status': 'error', 'message': 'Нет слотов'}
+
+        profile = app_state.profile
+        vk_cfg = profile.get('vk', {})
+        gt = vk_cfg.get('group_token', '').strip()
+        ut = vk_cfg.get('user_token', '').strip()
+        gid = vk_cfg.get('group_id', '').strip()
+        api_ver = vk_cfg.get('api_version', '5.131')
+
+        vk_group = get_vk_api(gt, api_ver)
+        vk_user = get_vk_api(ut, api_ver)
+
+        def _run():
+            result = fill_slots_with_queue(
+                slots, app_state.posts_dir, vk_user, vk_group,
+                gid, profile, app_state.add_log
+            )
+            app_state.add_log(f'[Слоты] Заполнено: {result["filled"]}, ошибок: {result["failed"]}', 'info')
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {'status': 'ok', 'message': f'Запущено заполнение {len(slots)} слотов', 'filled': len(slots), 'failed': 0}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.post('/publish/check_engagement')
+async def check_engagement_endpoint():
+    """Проверить статистику опубликованных постов и обновить модель обучения."""
+    try:
+        from vk.api import get_vk_api
+        from services.engagement import collect_engagement
+
+        profile = app_state.profile
+        vk_cfg = profile.get('vk', {})
+        ut = vk_cfg.get('user_token', '').strip()
+        gid = vk_cfg.get('group_id', '').strip()
+        if not ut:
+            return {'status': 'error', 'message': 'User Token не задан'}
+
+        vk_user = get_vk_api(ut, vk_cfg.get('api_version', '5.131'))
+        new_data = collect_engagement(app_state.active_profile_id, gid, vk_user)
+        checked = len(new_data)
+        if checked:
+            app_state.add_log(f'[Обучение] Обновлены данные для {checked} постов', 'info')
+        else:
+            app_state.add_log('[Обучение] Новых данных нет (посты проверены или слишком свежие)', 'info')
+
+        return {'status': 'ok', 'checked': checked, 'message': f'Проверено постов: {checked}'}
+    except Exception as e:
+        app_state.add_log(f'[Обучение] Ошибка: {e}', 'error')
+        return {'status': 'error', 'message': str(e)}

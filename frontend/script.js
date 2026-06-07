@@ -388,6 +388,9 @@ function renderSettings() {
   setChecked('publishHoursEnabled', pub.publish_hours_enabled !== false);
   setValue('publishStart', pub.publish_hours_start ?? 8);
   setValue('publishEnd', pub.publish_hours_end ?? 22);
+  setValue('publishTimezone', pub.timezone || 'Europe/Moscow');
+  setValue('maxPostsPerDay', pub.max_posts_per_day ?? 4);
+  setChecked('smartScheduleEnabled', pub.smart_schedule_enabled !== false);
   setValue('hashtags', (processing.hashtags || []).join(' '));
   setChecked('photoOnly', processing.photo_only);
   setChecked('allowVideo', processing.allow_video);
@@ -416,7 +419,7 @@ function renderSettings() {
   setValue('wmPosition', wm.position || 'bottom_right');
   setValue('wmText', wm.text || '');
   setValue('wmFontSize', wm.font_size || 0);
-  setValue('wmOpacity', wm.opacity ?? 180);
+  setValue('wmOpacity', wm.opacity ?? 230);
   const wmColorArr = wm.color || [255, 255, 255];
   const wmHex = '#' + wmColorArr.map(v => v.toString(16).padStart(2, '0')).join('');
   setValue('wmColor', wmHex);
@@ -449,6 +452,9 @@ function collectSettings() {
       publish_hours_enabled: checked('publishHoursEnabled'),
       publish_hours_start: num('publishStart'),
       publish_hours_end: num('publishEnd'),
+      timezone: val('publishTimezone') || 'Europe/Moscow',
+      max_posts_per_day: num('maxPostsPerDay') || 4,
+      smart_schedule_enabled: checked('smartScheduleEnabled'),
     },
     processing: {
       add_hashtags: hashtags.length > 0,
@@ -771,9 +777,39 @@ async function saveMonitorSettings() {
   }, 'Мониторинг сохранен');
 }
 
+let _logsAll = [];
+let _logFilter = 'all';
+
+function setLogFilter(filter, btn) {
+  _logFilter = filter;
+  document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderLogFiltered();
+}
+
+function _classifyLog(msg) {
+  if (!msg) return 'other';
+  const m = msg.toLowerCase();
+  if (m.includes('[публикация]') || m.includes('запланирован') || m.includes('опубликован') || m.includes('publish')) return 'publish';
+  if (m.includes('[обучение]') || m.includes('[умное расписание]') || m.includes('модель') || m.includes('engagement')) return 'learn';
+  if (m.includes('[слоты]') || m.includes('slot') || m.includes('пустые слоты')) return 'slots';
+  if (m.includes('ошибка') || m.includes('error') || m.includes('failed') || m.includes('критичн')) return 'error';
+  return 'other';
+}
+
+function renderLogFiltered() {
+  const logs = _logFilter === 'all'
+    ? _logsAll
+    : _logFilter === 'error'
+      ? _logsAll.filter(l => (l.level === 'error' || l.level === 'warning') || _classifyLog(l.message || l) === 'error')
+      : _logsAll.filter(l => _classifyLog(l.message || l) === _logFilter);
+  renderLog('logsList', logs);
+}
+
 async function loadLogs() {
   const data = await api('/logs').catch(() => ({ logs: [] }));
-  renderLog('logsList', data.logs || []);
+  _logsAll = data.logs || [];
+  renderLogFiltered();
   await loadCleanupStatus();
 }
 
@@ -1064,5 +1100,40 @@ async function gaApplyRecommendation() {
   }).catch(error => ({ status: 'error', message: error.message }));
   $('gaStatusText').textContent = data.message || 'Рекомендации применены';
   gaLastRecommendationPatch = null;
+}
+
+// ── Умное расписание: слоты и engagement ─────────────────────────────
+async function fillSlots() {
+  const btn = document.querySelector('button[onclick="fillSlots()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Ищу слоты...'; }
+  try {
+    const data = await api('/publish/fill_slots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }).catch(e => ({ status: 'error', message: e.message }));
+    if (data.slots && data.slots.length > 0) {
+      const preview = data.slots.slice(0, 5).map(s => s.display).join(', ');
+      const more = data.slots.length > 5 ? ` и ещё ${data.slots.length - 5}...` : '';
+      const confirmed = confirm(`Найдено ${data.slots.length} свободных слотов:\n${preview}${more}\n\nЗаполнить постами из очереди?`);
+      if (confirmed) {
+        const res = await api('/publish/fill_slots_apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slots: data.slots }) }).catch(e => ({ filled: 0, failed: 0 }));
+        showToast(`Заполнено: ${res.filled}, ошибок: ${res.failed}`, res.failed > 0 ? 'warning' : 'success');
+        if (document.querySelector('.tab-content.active')?.id === 'logs') loadLogs();
+      }
+    } else {
+      showToast(data.message || 'Свободных слотов не найдено', 'info');
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔍 Заполнить пустые слоты'; }
+  }
+}
+
+async function checkEngagement() {
+  const btn = document.querySelector('button[onclick="checkEngagement()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Проверяю...'; }
+  try {
+    const data = await api('/publish/check_engagement', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }).catch(e => ({ checked: 0, message: e.message }));
+    showToast(data.message || `Проверено постов: ${data.checked || 0}`, 'success');
+    if (document.querySelector('.tab-content.active')?.id === 'logs') loadLogs();
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📊 Проверить engagement'; }
+  }
 }
 

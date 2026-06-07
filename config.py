@@ -197,6 +197,9 @@ class AppState:
                 'publish_hours_enabled': True,
                 'publish_hours_start': 8,
                 'publish_hours_end': 22,
+                'timezone': 'Europe/Moscow',
+                'max_posts_per_day': 4,
+                'smart_schedule_enabled': True,
             },
             'processing': {
                 'add_hashtags': False,
@@ -211,7 +214,7 @@ class AppState:
                 'logo_path': '',
                 'position': 'bottom_right',
                 'font_size': 0,        # 0 = авто
-                'opacity': 180,
+                'opacity': 230,
                 'color': [255, 255, 255],
                 'logo_scale': 0.12,
             },

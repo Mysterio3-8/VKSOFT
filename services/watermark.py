@@ -100,7 +100,7 @@ def apply_logo_watermark(
     *,
     position: str = 'bottom_right',
     scale: float = 0.12,     # доля от ширины фото
-    opacity: int = 200,
+    opacity: int = 230,
 ) -> bool:
     """
     Наложить PNG-логотип (с прозрачностью) на фото.
@@ -153,7 +153,7 @@ def apply_watermark_from_profile(image_path: str | Path, profile: dict) -> bool:
         'logo_path': '/path/to/logo.png',
         'position': 'bottom_right',
         'font_size': 0,
-        'opacity': 180,
+        'opacity': 230,
         'color': [255, 255, 255],
         'logo_scale': 0.12,
     }
@@ -164,7 +164,7 @@ def apply_watermark_from_profile(image_path: str | Path, profile: dict) -> bool:
 
     mode = wm.get('mode', 'text')
     position = wm.get('position', 'bottom_right')
-    opacity = int(wm.get('opacity', 180))
+    opacity = int(wm.get('opacity', 230))
 
     if mode == 'logo':
         logo_path = wm.get('logo_path', '')

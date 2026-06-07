@@ -132,6 +132,29 @@ def publish_worker(count: int):
         else:
             next_ts = int(time.time())
 
+        # Умное расписание: если включено — загружаем модель и занятые слоты
+        _smart_schedule_enabled = pub_cfg.get('smart_schedule_enabled', False)
+        _smart_occupied: list[int] = []
+        _smart_model: dict = {}
+        if postponed and _smart_schedule_enabled:
+            try:
+                from services.engagement import load_engagement_model, collect_engagement
+                from services.slot_finder import fetch_postponed_timestamps
+                _smart_model = load_engagement_model(app_state.active_profile_id)
+                _smart_occupied = fetch_postponed_timestamps(vk, owner_id)
+                # Запустить сбор engagement для непроверенных постов
+                new_eng = collect_engagement(app_state.active_profile_id, group_id, vk_user)
+                if new_eng:
+                    app_state.add_log(f'[Обучение] Обновлены данные для {len(new_eng)} постов', 'info')
+                app_state.add_log(
+                    f'[Умное расписание] Модель: {"обучена" if _smart_model.get("hour_heatmap") else "стартовая"}, '
+                    f'занято слотов: {len(_smart_occupied)}',
+                    'info'
+                )
+            except Exception as e:
+                app_state.add_log(f'[Умное расписание] Ошибка загрузки: {e}', 'warning')
+                _smart_schedule_enabled = False
+
         learned_schedule_slots = []
         growth_schedule = profile.get('growth_schedule', {})
         if postponed and growth_schedule.get('enabled') and growth_schedule.get('mode') == 'learned_24h':
@@ -291,26 +314,43 @@ def publish_worker(count: int):
                     params['attachments'] = ','.join(attachments)
 
                 if postponed:
-                    if learned_schedule_slots and index <= len(learned_schedule_slots):
+                    if _smart_schedule_enabled:
+                        # Умное расписание с обучением
+                        try:
+                            from services.smart_scheduler import next_publish_timestamp
+                            _last_ts = read_last_scheduled() or int(time.time())
+                            next_ts, _chosen_hour = next_publish_timestamp(
+                                _last_ts, profile, _smart_model, _smart_occupied
+                            )
+                            _smart_occupied = sorted(_smart_occupied + [next_ts])
+                            app_state.add_log(
+                                f'[Умное расписание] {datetime.fromtimestamp(next_ts).strftime(“%d.%m %H:%M”)} (час {_chosen_hour})',
+                                'info'
+                            )
+                        except Exception as e:
+                            app_state.add_log(f'[Умное расписание] Fallback: {e}', 'warning')
+                            next_ts = (read_last_scheduled() or int(time.time())) + random.randint(delay_min, delay_max)
+                    elif learned_schedule_slots and index <= len(learned_schedule_slots):
                         next_ts = learned_schedule_slots[index - 1].ts
                     # Ensure publish_date is in the future (VK API requirement)
                     now = int(time.time())
                     if next_ts <= now:
                         next_ts = now + random.randint(delay_min, delay_max)
                         app_state.add_log(
-                            f'Р”Р°С‚Р° РІ РїСЂРѕС€Р»РѕРј, СЃРєРѕСЂСЂРµРєС‚РёСЂРѕРІР°РЅРѕ РЅР° {delay_min}-{delay_max}СЃ',
+                            f'Дата в прошлом, скорректировано на {delay_min}-{delay_max}с',
                             'warning'
                         )
-                    if peak_on and peak_hours_list:
-                        next_ts = adjust_to_peak_hours(next_ts, peak_hours_list)
-                    elif hours_on:
-                        next_ts = adjust_to_publish_window(next_ts, h_start, h_end)
+                    if not _smart_schedule_enabled:
+                        if peak_on and peak_hours_list:
+                            next_ts = adjust_to_peak_hours(next_ts, peak_hours_list)
+                        elif hours_on:
+                            next_ts = adjust_to_publish_window(next_ts, h_start, h_end)
                     params['publish_date'] = next_ts
                     scheduled_label = datetime.fromtimestamp(next_ts).strftime('%d.%m %H:%M')
 
                 result = vk_call_safe(vk.wall.post, **params)
 
-                # в”Ђв”Ђ РџСѓРЅРєС‚ 7: С‚СЂРµРєРёРЅРі РїРѕСЃС‚Р° в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
+                # ── Пункт 7: трекинг поста ────────────────────────────────
                 if result and isinstance(result, dict):
                     vk_post_id = result.get('post_id')
                     if vk_post_id:
@@ -320,6 +360,23 @@ def publish_worker(count: int):
                             _track(vk_post_id, owner_id, str(source_cid), published_at=params.get('publish_date'))
                         except Exception:
                             pass
+                        # Записать для engagement-обучения
+                        if _smart_schedule_enabled:
+                            try:
+                                from services.engagement import record_published_post
+                                from datetime import datetime as _dt, timedelta as _td
+                                _pub_ts = params.get('publish_date', int(time.time()))
+                                _tz_offset = 3  # fallback MSK
+                                try:
+                                    from services.smart_scheduler import _get_tz_offset
+                                    _tz_offset = _get_tz_offset(pub_cfg.get('timezone', 'Europe/Moscow'))
+                                except Exception:
+                                    pass
+                                _local_hour = (_dt.utcfromtimestamp(_pub_ts) + _td(hours=_tz_offset)).hour
+                                record_published_post(app_state.active_profile_id, vk_post_id, _pub_ts, _local_hour)
+                                app_state.add_log(f'[Обучение] Пост {vk_post_id} записан (час {_local_hour})', 'info')
+                            except Exception as _e:
+                                app_state.add_log(f'[Обучение] Ошибка записи: {_e}', 'warning')
 
                 # в”Ђв”Ђ РџСѓРЅРєС‚ 3: РєСЂРѕСЃСЃ-РїРѕСЃС‚РёРЅРі в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
                 cross_cfg = profile.get('cross_post', {})

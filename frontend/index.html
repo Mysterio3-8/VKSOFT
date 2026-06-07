@@ -77,25 +77,14 @@
           <div class="stat-card flat"><div class="stat-label">Цикл</div><div class="stat-value small" id="dashGaCycle">ожидание</div><div class="stat-sub" id="dashGaQueue">очередь: 0</div></div>
         </div>
         <div class="form-section">
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Режим источника</label>
-              <select class="form-input" id="gaSourceMode">
-                <option value="single">Один источник</option>
-                <option value="approved">Одобренные источники</option>
-              </select>
-            </div>
-            <div class="form-group"><label class="form-label">ID источника VK</label><input class="form-input" id="gaSingleSourceId" placeholder="ID сообщества"></div>
-          </div>
           <div class="form-row-3">
             <div class="form-group"><label class="form-label">Дней вперёд</label><input class="form-input" id="gaHorizonDays" type="number" min="1" max="7" value="2"></div>
             <div class="form-group"><label class="form-label">Постов в день</label><input class="form-input" id="gaPostsPerDay" type="number" min="1" value="12"></div>
             <div class="form-group"><label class="form-label">Мин. viral score</label><input class="form-input" id="gaMinScore" type="number" min="0" value="30"></div>
           </div>
-          <div class="form-row-3">
+          <div class="form-row">
             <div class="form-group"><label class="form-label">Публиковать с</label><input class="form-input" id="gaHoursStart" type="number" min="0" max="23" value="8"></div>
             <div class="form-group"><label class="form-label">Публиковать до</label><input class="form-input" id="gaHoursEnd" type="number" min="0" max="23" value="23"></div>
-            <div class="form-group"><label class="form-label">Антиплагиат</label><input class="form-input" value="Жёсткий" readonly></div>
           </div>
           <div class="button-row">
             <button class="btn btn-secondary" onclick="gaRunPlan()">Проверить план</button>
@@ -176,7 +165,7 @@
           <button class="settings-tab" data-settings="processing">Обработка</button>
           <button class="settings-tab" data-settings="filters">Фильтры</button>
           <button class="settings-tab" data-settings="polls">Опросы</button>
-          <button class="settings-tab" data-settings="antiplagiat">Антиплагиат</button>
+          <button class="settings-tab" data-settings="antiplagiat">Водяной знак</button>
         </div>
 
         <div class="settings-panel active" id="settings-vk">
@@ -197,9 +186,12 @@
           <div class="form-section">
             <div class="form-row-3"><div class="form-group"><label class="form-label">Постов за запуск</label><input class="form-input" id="postsToPublish" type="number" min="1"></div><div class="form-group"><label class="form-label">Интервал мин, сек</label><input class="form-input" id="publishDelayMin" type="number" min="0"></div><div class="form-group"><label class="form-label">Интервал макс, сек</label><input class="form-input" id="publishDelayMax" type="number" min="0"></div></div>
             <div class="form-row"><div class="form-group"><label class="form-label">Публиковать с часа</label><input class="form-input" id="publishStart" type="number" min="0" max="23"></div><div class="form-group"><label class="form-label">Публиковать до часа</label><input class="form-input" id="publishEnd" type="number" min="0" max="23"></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">Часовой пояс аудитории</label><select class="form-input" id="publishTimezone"><option value="Europe/Moscow">Москва (UTC+3)</option><option value="Europe/Samara">Самара (UTC+4)</option><option value="Asia/Yekaterinburg">Екатеринбург (UTC+5)</option><option value="Asia/Omsk">Омск (UTC+6)</option><option value="Asia/Krasnoyarsk">Красноярск (UTC+7)</option><option value="Asia/Irkutsk">Иркутск (UTC+8)</option><option value="Asia/Yakutsk">Якутск (UTC+9)</option><option value="Asia/Vladivostok">Владивосток (UTC+10)</option><option value="Asia/Magadan">Магадан (UTC+11)</option><option value="Asia/Kamchatka">Камчатка (UTC+12)</option></select></div><div class="form-group"><label class="form-label">Макс. постов в день</label><input class="form-input" id="maxPostsPerDay" type="number" min="1" max="20" value="4"></div></div>
             <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Отложенные посты</span><span class="toggle-desc">Расставлять посты по времени</span></span><span class="toggle"><input id="postponedEnabled" type="checkbox"><span class="toggle-slider"></span></span></label>
             <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Рабочие часы</span><span class="toggle-desc">Публиковать только в выбранном окне</span></span><span class="toggle"><input id="publishHoursEnabled" type="checkbox"><span class="toggle-slider"></span></span></label>
+            <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Умное расписание</span><span class="toggle-desc">Алгоритм учится выбирать лучшее время по данным группы</span></span><span class="toggle"><input id="smartScheduleEnabled" type="checkbox"><span class="toggle-slider"></span></span></label>
             <div class="form-row"><div class="form-group"><label class="form-label">Последний отложенный</label><input class="form-input" id="lastScheduledInput" type="datetime-local"></div><div class="form-group"><label class="form-label">&nbsp;</label><button class="btn btn-secondary" onclick="saveLastScheduled()">Сохранить время</button></div></div>
+            <div class="form-row"><div class="form-group"><label class="form-label">&nbsp;</label><button class="btn btn-primary" onclick="fillSlots()">🔍 Заполнить пустые слоты</button></div><div class="form-group"><label class="form-label">&nbsp;</label><button class="btn btn-ghost" onclick="checkEngagement()">📊 Проверить engagement</button></div></div>
           </div>
         </div>
 
@@ -308,7 +300,20 @@
 
     <section class="tab-content" id="logs">
       <div class="grid-2">
-        <div class="card"><div class="card-header"><div class="card-title">Логи</div><button class="btn btn-ghost btn-sm" onclick="clearLogs()">Очистить</button></div><div class="log-list" id="logsList"></div></div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Логи</div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm log-filter-btn active" data-filter="all" onclick="setLogFilter('all',this)">Все</button>
+              <button class="btn btn-ghost btn-sm log-filter-btn" data-filter="publish" onclick="setLogFilter('publish',this)">📤 Публикация</button>
+              <button class="btn btn-ghost btn-sm log-filter-btn" data-filter="learn" onclick="setLogFilter('learn',this)">🧠 Обучение</button>
+              <button class="btn btn-ghost btn-sm log-filter-btn" data-filter="slots" onclick="setLogFilter('slots',this)">🔍 Слоты</button>
+              <button class="btn btn-ghost btn-sm log-filter-btn" data-filter="error" onclick="setLogFilter('error',this)" style="color:#f87171">⚠ Ошибки</button>
+              <button class="btn btn-ghost btn-sm" onclick="clearLogs()">Очистить</button>
+            </div>
+          </div>
+          <div class="log-list" id="logsList"></div>
+        </div>
         <div class="card"><div class="card-header"><div class="card-title">Очистка очередей</div><button class="btn btn-ghost btn-sm" onclick="loadCleanupStatus()">Обновить</button></div><div class="form-section"><div id="cleanupStatus"></div><button class="btn btn-secondary" onclick="post('/cleanup/junk', {}, 'Мусор очищен')">Очистить мусор</button><button class="btn btn-secondary" onclick="post('/cleanup/media', {}, 'Медиа-очереди очищены')">Очистить медиа</button><button class="btn btn-danger" onclick="post('/cleanup/posts', {}, 'Очередь постов очищена')">Очистить скачанные посты</button><button class="btn btn-danger" onclick="post('/cleanup/all', {}, 'Очереди очищены')">Очистить все очереди</button><div class="form-hint">Автоочистка после успешной публикации включена по умолчанию.</div></div></div>
       </div>
     </section>
