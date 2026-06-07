@@ -62,6 +62,12 @@ def build_hour_heatmap(data: list) -> list:
     for post in data:
         if not post.get('checked'):
             continue
+        if post.get('missing'):
+            continue
+        # Нулевые просмотры = пост не вышел или не отследился. Такие данные не
+        # несут сигнала о лучшем времени — исключаем из обучения.
+        if int(post.get('views', 0) or 0) <= 0:
+            continue
         published_at = post.get('published_at')
         if not published_at:
             continue
@@ -93,7 +99,8 @@ def build_hour_heatmap(data: list) -> list:
 
 def get_summary() -> dict:
     data = _load()
-    checked = [p for p in data if p.get('checked')]
+    # Для обучения значимы только посты с реальными данными (views>0).
+    checked = [p for p in data if p.get('checked') and not p.get('missing') and int(p.get('views', 0) or 0) > 0]
     heatmap = build_hour_heatmap(data)
     if not checked:
         return {
@@ -164,13 +171,22 @@ def run_check():
                 items = (resp.get('items', []) if isinstance(resp, dict) else resp) or []
                 stats_map = {item['id']: item for item in items}
                 for p in batch:
-                    item = stats_map.get(p['post_id'], {})
+                    item = stats_map.get(p['post_id'])
                     if item:
                         p['likes']   = item.get('likes',   {}).get('count', 0)
                         p['views']   = item.get('views',   {}).get('count', 0)
                         p['reposts'] = item.get('reposts', {}).get('count', 0)
-                    p['checked'] = True
-                    updated = True
+                        p['checked'] = True
+                        updated = True
+                    else:
+                        # Пост не найден (удалён/не вышел). Не помечаем checked —
+                        # иначе нулевые views навсегда отравят обучение. Считаем
+                        # попытки и сдаёмся после нескольких.
+                        p['check_attempts'] = int(p.get('check_attempts', 0)) + 1
+                        if p['check_attempts'] >= 3:
+                            p['checked'] = True
+                            p['missing'] = True
+                        updated = True
                 time.sleep(0.5)
             except Exception as e:
                 logger.warning(f'tracker batch: {e}')

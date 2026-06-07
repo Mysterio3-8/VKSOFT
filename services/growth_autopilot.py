@@ -114,6 +114,23 @@ def _top_heatmap_hours(heatmap: List[Dict], limit: int = 8) -> List[int]:
     return [int(item['hour']) for item in ranked[:limit] if 0 <= int(item['hour']) <= 23]
 
 
+def _round_robin_fill(hours: List[int], n: int) -> List[int]:
+    """Заполнить n слотов часами: полные круги по всем часам, затем случайный
+    добор. Гарантирует представленность каждого часа при n >= len(hours)."""
+    if not hours or n <= 0:
+        return []
+    full_rounds = n // len(hours)
+    remainder = n % len(hours)
+    result: List[int] = []
+    for _ in range(full_rounds):
+        chunk = list(hours)
+        random.shuffle(chunk)
+        result.extend(chunk)
+    if remainder:
+        result.extend(random.sample(hours, remainder))
+    return result
+
+
 def build_learned_24h_schedule(
     count: int,
     start_ts: int,
@@ -129,30 +146,44 @@ def build_learned_24h_schedule(
 
     preferred = _top_heatmap_hours(heatmap or [], limit=8)
     if not preferred:
-        preferred = [0, 2, 6, 8, 11, 14, 17, 20, 22]
+        # Разнообразный fallback по всему активному дню, пока трекер не обучился.
+        preferred = [8, 10, 12, 14, 16, 18, 20, 22]
 
-    explore_hours = [hour for hour in range(24) if hour not in preferred]
+    explore_hours = [hour for hour in range(24) if hour not in preferred] or list(range(24))
     exploit_count = min(count, max(1, round(count * exploitation_percent / 100)))
     explore_count = max(0, count - exploit_count)
 
-    selected = []
-    for i in range(exploit_count):
-        selected.append((preferred[i % len(preferred)], 'best'))
-    for i in range(explore_count):
-        pool = explore_hours or preferred
-        selected.append((pool[i % len(pool)], 'test'))
+    # Сначала гарантируем каждый preferred-час хотя бы раз (полные «круги»),
+    # затем добиваем остаток случайной выборкой — так топовые часы не теряются,
+    # но один и тот же час не идёт подряд.
+    best_seq = _round_robin_fill(preferred, exploit_count)
+    test_seq = _round_robin_fill(explore_hours, explore_count)
+
+    selected = [(h, 'best') for h in best_seq]
+    selected += [(h, 'test') for h in test_seq]
     random.shuffle(selected)
 
     start_dt = datetime.fromtimestamp(int(start_ts))
     slots = []
+    used_ts: set[int] = set()
     for idx, (hour, source) in enumerate(selected):
+        # Раскидываем по дням горизонта циклически, чтобы заполнить все дни.
         day_offset = idx % horizon_days
-        minute = random.randint(0, 55)
-        second = random.randint(0, 59)
-        dt = (start_dt + timedelta(days=day_offset)).replace(hour=hour, minute=minute, second=second)
-        while int(dt.timestamp()) <= int(start_ts):
-            dt += timedelta(days=1)
-        slots.append(ScheduleSlot(ts=int(dt.timestamp()), hour=hour, source=source))
+        for _ in range(8):  # до 8 попыток найти свободную минуту в этом часе
+            minute = random.randint(0, 59)
+            second = random.randint(0, 59)
+            dt = (start_dt + timedelta(days=day_offset)).replace(hour=hour, minute=minute, second=second)
+            while int(dt.timestamp()) <= int(start_ts):
+                dt += timedelta(days=1)
+            ts = int(dt.timestamp())
+            # Избегаем коллизий минут (иначе VK 214) — округляем уникальность до минуты.
+            ts_minute = ts - (ts % 60)
+            if ts_minute not in used_ts:
+                used_ts.add(ts_minute)
+                slots.append(ScheduleSlot(ts=ts, hour=hour, source=source))
+                break
+        else:
+            slots.append(ScheduleSlot(ts=int(dt.timestamp()), hour=hour, source=source))
 
     slots.sort(key=lambda item: item.ts)
     return slots[:count]

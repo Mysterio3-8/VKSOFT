@@ -195,3 +195,51 @@ def test_learned_24h_schedule_uses_best_hours_and_keeps_exploration():
     assert 20 in hours
     assert len(set(hours)) > 2
     assert len(schedule) == 12
+
+
+def test_heatmap_ignores_zero_views_and_missing():
+    """Нулевые views и missing-посты не должны загрязнять обучение."""
+    import time
+    now = int(time.time())
+    data = [
+        {'checked': True, 'views': 200, 'likes': 10, 'reposts': 2, 'published_at': now},
+        {'checked': True, 'views': 0, 'likes': 0, 'reposts': 0, 'published_at': now},
+        {'checked': True, 'missing': True, 'views': 0, 'published_at': now},
+        {'checked': False, 'views': 0, 'published_at': now},
+    ]
+    heatmap = build_hour_heatmap(data)
+    total_posts = sum(b['posts'] for b in heatmap)
+    assert total_posts == 1  # учтён только пост с реальными views
+
+
+def test_empty_heatmap_gives_diverse_hours():
+    """Без обучения расписание должно давать разные часы, не один и тот же."""
+    import time
+    slots = build_learned_24h_schedule(
+        count=16, start_ts=int(time.time()), heatmap=[], horizon_days=2,
+    )
+    hours = [s.hour for s in slots]
+    assert len(set(hours)) >= 6  # минимум 6 разных часов из 16 слотов
+
+
+def test_schedule_avoids_minute_collisions():
+    """Слоты не должны совпадать до минуты (иначе VK выдаёт ошибку 214)."""
+    import time
+    slots = build_learned_24h_schedule(
+        count=24, start_ts=int(time.time()), heatmap=[], horizon_days=3,
+    )
+    minutes = [s.ts - s.ts % 60 for s in slots]
+    assert len(minutes) == len(set(minutes))
+
+
+def test_learned_heatmap_prefers_best_hours():
+    """При обученном heatmap большинство слотов — в лучших часах."""
+    import time
+    heatmap = [{'hour': h, 'posts': 5, 'avg_score': sc}
+               for h, sc in [(9, 100), (19, 90), (21, 80), (3, 5)]]
+    slots = build_learned_24h_schedule(
+        count=20, start_ts=int(time.time()), heatmap=heatmap,
+        horizon_days=2, exploitation_percent=75,
+    )
+    best = sum(1 for s in slots if s.source == 'best')
+    assert best >= 14  # ~75% exploitation
