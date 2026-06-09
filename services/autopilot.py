@@ -52,7 +52,7 @@ def default_profile_patch() -> Dict:
             'posts_to_download': 35,
             'delay_min': 2,
             'delay_max': 5,
-            'check_duplicates': True,
+            'check_duplicates': False,
         },
         'publishing_settings': {
             'posts_to_publish': 35,

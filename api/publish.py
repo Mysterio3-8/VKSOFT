@@ -141,7 +141,7 @@ async def find_fill_slots():
         vk = get_vk_api(gt, vk_cfg.get('api_version', '5.131'))
         model = load_engagement_model(app_state.active_profile_id)
         occupied = fetch_postponed_timestamps(vk, gid)
-        slots = find_empty_slots(occupied, profile, model, max_slots=min(pending, 30))
+        slots = find_empty_slots(occupied, profile, model, max_slots=min(pending, 30), profile_id=app_state.active_profile_id)
 
         if not slots:
             return {'status': 'ok', 'slots': [], 'message': 'Свободных слотов не найдено — очередь заполнена'}

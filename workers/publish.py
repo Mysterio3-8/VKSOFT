@@ -53,6 +53,86 @@ def _upload_local_photos_with_fallback(vk_user, gid_num: int, selected_photos: l
     return attachments
 
 
+def _compose_publish_text(post: dict, profile: dict, profile_id: str) -> str:
+    processing = profile.get('processing', {})
+    ap_cfg = profile.get('antiplagiaat', {})
+
+    text = post.get('text', '').strip()
+    if processing.get('photo_only', False):
+        text = ''
+    if ap_cfg.get('enabled') and ap_cfg.get('clear_text', True):
+        text = ''
+
+    from services.content_library import compose_caption, get_active_promo_message
+    from services.learning import get_smart_hashtags
+
+    # Promo-сообщение заменяет весь текст поста если включено
+    promo = get_active_promo_message(profile_id)
+    if promo:
+        return promo
+
+    smart_tags = get_smart_hashtags(profile_id)
+    return compose_caption(
+        text,
+        add_tags=True,
+        profile_tags=processing.get('hashtags', []),
+        add_profile_tags=processing.get('add_hashtags') or not text,
+        extra_tags=smart_tags if smart_tags else None,
+    )
+
+
+def _prepare_local_photos_for_publish(local_photos: list, profile: dict, log) -> tuple[list, list]:
+    local_photos = list(local_photos or [])
+    all_local_photos = list(local_photos)
+    ap_cfg = profile.get('antiplagiaat', {})
+
+    if ap_cfg.get('enabled'):
+        max_ph = int(ap_cfg.get('max_photos', 5))
+        mode = ap_cfg.get('remove_photo', 'random')
+        if len(local_photos) >= 2:
+            before = len(local_photos)
+            if mode == 'first':
+                local_photos = local_photos[1:]
+            elif mode == 'last':
+                local_photos = local_photos[:-1]
+            else:
+                idx = random.randint(0, len(local_photos) - 1)
+                local_photos = local_photos[:idx] + local_photos[idx + 1:]
+            log(
+                f'РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ {before} в†’ {len(local_photos)} (СѓРґР°Р»РµРЅРѕ РѕРґРЅРѕ, СЂРµР¶РёРј: {mode})',
+                'info'
+            )
+        if len(local_photos) > max_ph:
+            before = len(local_photos)
+            random.shuffle(local_photos)
+            local_photos = local_photos[:max_ph]
+            log(
+                f'РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ {before} в†’ {len(local_photos)} (Р»РёРјРёС‚: {max_ph})',
+                'info'
+            )
+        random.shuffle(local_photos)
+        if local_photos:
+            log('РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ РїРµСЂРµРјРµС€Р°РЅС‹', 'info')
+
+    if ap_cfg.get('enabled') and local_photos:
+        from services.photo_transform import apply_transforms_from_profile
+        tr_ok = apply_transforms_from_profile(local_photos, profile)
+        if tr_ok:
+            log(f'РђРЅС‚РёРїР»Р°РіРёР°С‚ С‚СЂР°РЅСЃС„РѕСЂРјР°С†РёРё: {tr_ok} С„РѕС‚Рѕ', 'info')
+
+    wm_cfg = profile.get('watermark', {})
+    if wm_cfg.get('enabled') and local_photos:
+        from services.watermark import apply_watermark_from_profile
+        wm_ok = 0
+        for pp_str in local_photos:
+            if apply_watermark_from_profile(pp_str, profile):
+                wm_ok += 1
+        if wm_ok:
+            log(f'Р’РѕРґСЏРЅРѕР№ Р·РЅР°Рє: {wm_ok} С„РѕС‚Рѕ', 'info')
+
+    return local_photos, all_local_photos
+
+
 def publish_worker(count: int):
     try:
         profile = app_state.profile
@@ -225,81 +305,15 @@ def publish_worker(count: int):
                     'message': f'РџСѓР±Р»РёРєР°С†РёСЏ {index} РёР· {len(post_files)}',
                 })
                 post = json.loads(post_file.read_text(encoding='utf-8'))
-                text = post.get('text', '').strip()
-                tags = ' '.join(processing.get('hashtags', []))
-                ap_cfg = profile.get('antiplagiaat', {})
-
-                # Photo-only: discard text.
-                if processing.get('photo_only', False):
-                    text = ''
-
-                # РђРЅС‚РёРїР»Р°РіРёР°С‚: СѓР±СЂР°С‚СЊ РѕСЂРёРіРёРЅР°Р»СЊРЅС‹Р№ С‚РµРєСЃС‚ (РѕСЃС‚Р°РІРёС‚СЊ С‚РѕР»СЊРєРѕ СЃРІРѕРё С…СЌС€С‚РµРіРё)
-                if ap_cfg.get('enabled') and ap_cfg.get('clear_text', True):
-                    text = ''
-
-                from services.content_library import compose_caption
-                from services.learning import get_smart_hashtags
-                smart_tags = get_smart_hashtags(app_state.active_profile_id)
-                text = compose_caption(
-                    text,
-                    add_tags=True,
-                    profile_tags=processing.get('hashtags', []),
-                    add_profile_tags=processing.get('add_hashtags') or not text,
-                    extra_tags=smart_tags if smart_tags else None,
-                )
+                text = _compose_publish_text(post, profile, app_state.active_profile_id)
 
                 # Upload photos
                 attachments = []
-                local_photos = post.get('_local_photos', [])
-                all_local_photos = list(local_photos)
-
-                # РђРЅС‚РёРїР»Р°РіРёР°С‚: РѕРіСЂР°РЅРёС‡РёС‚СЊ РєРѕР»РёС‡РµСЃС‚РІРѕ С„РѕС‚Рѕ Рё РїРµСЂРµРјРµС€Р°С‚СЊ
-                if ap_cfg.get('enabled'):
-                    max_ph = int(ap_cfg.get('max_photos', 5))
-                    mode = ap_cfg.get('remove_photo', 'random')
-                    if len(local_photos) >= 2:
-                        before = len(local_photos)
-                        if mode == 'first':
-                            local_photos = local_photos[1:]
-                        elif mode == 'last':
-                            local_photos = local_photos[:-1]
-                        else:
-                            idx = random.randint(0, len(local_photos) - 1)
-                            local_photos = local_photos[:idx] + local_photos[idx + 1:]
-                        app_state.add_log(
-                            f'РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ {before} в†’ {len(local_photos)} (СѓРґР°Р»РµРЅРѕ РѕРґРЅРѕ, СЂРµР¶РёРј: {mode})',
-                            'info'
-                        )
-                    if len(local_photos) > max_ph:
-                        before = len(local_photos)
-                        mode = ap_cfg.get('remove_photo', 'last')
-                        random.shuffle(local_photos)
-                        local_photos = local_photos[:max_ph]
-                        app_state.add_log(
-                            f'РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ {before} в†’ {len(local_photos)} (Р»РёРјРёС‚: {max_ph})',
-                            'info'
-                        )
-                    # РџРµСЂРµРјРµС€РёРІР°РµРј С„РѕС‚Рѕ вЂ” СѓРЅРёРєР°Р»СЊРЅС‹Р№ РїРѕСЂСЏРґРѕРє РґР»СЏ РєР°Р¶РґРѕРіРѕ РїРѕСЃС‚Р°
-                    random.shuffle(local_photos)
-                    app_state.add_log('РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ РїРµСЂРµРјРµС€Р°РЅС‹', 'info')
-
-                # Р¤РѕС‚Рѕ-С‚СЂР°РЅСЃС„РѕСЂРјР°С†РёРё Р°РЅС‚РёРїР»Р°РіРёР°С‚ (РєСЂРѕРї, С†РІРµС‚, Р·РµСЂРєР°Р»Рѕ)
-                if ap_cfg.get('enabled') and local_photos:
-                    from services.photo_transform import apply_transforms_from_profile
-                    tr_ok = apply_transforms_from_profile(local_photos, profile)
-                    if tr_ok:
-                        app_state.add_log(f'РђРЅС‚РёРїР»Р°РіРёР°С‚ С‚СЂР°РЅСЃС„РѕСЂРјР°С†РёРё: {tr_ok} С„РѕС‚Рѕ', 'info')
-
-                # Р’РѕРґСЏРЅРѕР№ Р·РЅР°Рє вЂ” РЅР°Р»РѕР¶РёС‚СЊ РїРµСЂРµРґ Р·Р°РіСЂСѓР·РєРѕР№ РІ VK
-                wm_cfg = profile.get('watermark', {})
-                if wm_cfg.get('enabled') and local_photos:
-                    from services.watermark import apply_watermark_from_profile
-                    wm_ok = 0
-                    for pp_str in local_photos:
-                        if apply_watermark_from_profile(pp_str, profile):
-                            wm_ok += 1
-                    if wm_ok:
-                        app_state.add_log(f'Р’РѕРґСЏРЅРѕР№ Р·РЅР°Рє: {wm_ok} С„РѕС‚Рѕ', 'info')
+                local_photos, all_local_photos = _prepare_local_photos_for_publish(
+                    post.get('_local_photos', []),
+                    profile,
+                    app_state.add_log,
+                )
 
                 attachments.extend(_upload_local_photos_with_fallback(
                     vk_user,

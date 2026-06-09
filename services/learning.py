@@ -158,6 +158,7 @@ def run_learning_cycle() -> dict:
             app_state.save_config()
             applied_changes.append(f'peak_hours → {sorted(recommended_hours)}')
             logger.info(f'learning: обновил peak_hours → {sorted(recommended_hours)}')
+            app_state.add_log(f'[Обучение] Обновил часы публикации → {sorted(recommended_hours)}', 'info')
 
     # ── 8. Записываем состояние ──────────────────────────────────────
     state = {
@@ -182,6 +183,11 @@ def run_learning_cycle() -> dict:
         f'learning: цикл завершён. own_sample={own_sample}, '
         f'comp_sources={state["competitor_sources"]}, '
         f'recommended_hours={recommended_hours}'
+    )
+    app_state.add_log(
+        f'[Обучение] Цикл завершён. Постов: {own_sample}, '
+        f'часы: {recommended_hours}, тип контента: {best_content_type}',
+        'info'
     )
     return state
 
@@ -211,4 +217,5 @@ def learning_loop():
             run_learning_cycle()
         except Exception as e:
             logger.warning(f'learning_loop: {e}')
+            app_state.add_log(f'[Обучение] Ошибка цикла: {e}', 'error')
         time.sleep(LEARN_INTERVAL_SEC)

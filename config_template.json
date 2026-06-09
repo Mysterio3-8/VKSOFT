@@ -10,7 +10,7 @@
     "posts_to_download": 100,
     "batch_size": 100,
     "delay_between_requests": 1,
-    "check_duplicates": true
+    "check_duplicates": false
   },
   "publishing_settings": {
     "posts_to_publish": 50,

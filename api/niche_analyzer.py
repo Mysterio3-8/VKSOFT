@@ -48,11 +48,16 @@ async def niche_results():
     else:
         status = 'idle'
 
+    vk_cfg = app_state.profile.get('vk', {})
+    token_ok = bool(vk_cfg.get('user_token', '').strip())
+
     return {
         'status': status,
         'progress': progress_pct,
         'current_keyword': prog.get('keyword', ''),
         'results': app_state.niche_results,
+        'token_ok': token_ok,
+        'last_error': prog.get('error', ''),
     }
 
 

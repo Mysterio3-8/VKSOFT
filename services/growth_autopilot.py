@@ -30,8 +30,9 @@ DEFAULT_GROWTH_SETTINGS = {
     },
     'posts_per_day_min': 12,
     'posts_per_day_max': 24,
-    'allowed_hours_start': 8,
+    'allowed_hours_start': 0,
     'allowed_hours_end': 23,
+    'auto_apply_recommendations': True,
     'interval_jitter_min': 20,
     'queue_days': 1,
     'postponed_limit': 140,
@@ -95,6 +96,7 @@ def normalize_settings(settings: Optional[Dict]) -> Dict:
     if result['allowed_hours_end'] <= result['allowed_hours_start']:
         result['allowed_hours_end'] = 23
     result['exploitation_percent'] = max(50, min(95, result.get('exploitation_percent', 75)))
+    result['auto_apply_recommendations'] = bool(result.get('auto_apply_recommendations', True))
     return result
 
 
@@ -224,7 +226,7 @@ def build_cycle_patch(settings: Dict) -> Dict:
     patch = {
         'download_settings': {
             'posts_to_download': download_count,
-            'check_duplicates': True,
+            'check_duplicates': False,
             'batch_size': 100,
             'delay_min': 0,
             'delay_max': 0,
@@ -268,7 +270,7 @@ def build_cycle_patch(settings: Dict) -> Dict:
             },
         },
         'phash': {
-            'enabled': True,
+            'enabled': False,
         },
         'polls': {
             'enabled': False,
@@ -293,6 +295,32 @@ def cycle_status_file(profile_id: Optional[str] = None) -> Path:
     return _profile_dir(profile_id) / 'autopost_cycle_status.json'
 
 
+def _bot_changes_file(profile_id: Optional[str] = None) -> Path:
+    return _profile_dir(profile_id) / 'bot_changes_history.json'
+
+
+def _load_bot_changes() -> List[Dict]:
+    fp = _bot_changes_file()
+    if fp.exists():
+        try:
+            return json.loads(fp.read_text(encoding='utf-8'))
+        except Exception:
+            return []
+    return []
+
+
+def _save_bot_change(change: str) -> None:
+    """Сохранить запись об автоматическом изменении бота (последние 50)."""
+    fp = _bot_changes_file()
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    history = _load_bot_changes()
+    history.insert(0, {
+        'ts': datetime.now().strftime('%d.%m %H:%M'),
+        'text': change,
+    })
+    fp.write_text(json.dumps(history[:50], ensure_ascii=False, indent=2), encoding='utf-8')
+
+
 def save_cycle_status(data: Dict) -> Dict:
     fp = cycle_status_file()
     fp.parent.mkdir(parents=True, exist_ok=True)
@@ -308,6 +336,29 @@ def load_cycle_status() -> Dict:
         except Exception:
             return {}
     return {}
+
+
+def _rank_sources_by_er() -> List[str]:
+    """Вернуть список community_id источников, отсортированных по ER конкурентов.
+
+    Если данных нет — возвращает источники в исходном порядке.
+    """
+    sources = [s for s in app_state.profile.get('sources', []) if s.get('enabled', True)]
+    if not sources:
+        return []
+    try:
+        from services.competitor import get_competitor_insights
+        insights = get_competitor_insights(app_state.active_profile_id)
+        source_er: Dict[str, float] = insights.get('source_er', {})
+        if source_er:
+            return sorted(
+                [str(s.get('community_id', '')).strip() for s in sources],
+                key=lambda cid: source_er.get(cid, 0.0),
+                reverse=True,
+            )
+    except Exception:
+        pass
+    return [str(s.get('community_id', '')).strip() for s in sources]
 
 
 def _safe_int(value, default: int = 0) -> int:
@@ -679,17 +730,22 @@ def _run_cycle_worker(settings: Dict) -> None:
             _download_source(str(settings['single_source_id']).strip(), download_count)
             app_state.is_downloading = False
         else:
-            sources = [s for s in app_state.profile.get('sources', []) if s.get('enabled', True)]
-            per_source_count = distribute_download_count(download_count, len(sources))
-            for index, source in enumerate(sources, 1):
+            # Источники ранжируются по ER конкурентов — лучшие качают больше
+            ranked_cids = [cid for cid in _rank_sources_by_er() if cid]
+            if not ranked_cids:
+                ranked_cids = [
+                    str(s.get('community_id', '')).strip()
+                    for s in app_state.profile.get('sources', [])
+                    if s.get('enabled', True) and s.get('community_id', '')
+                ]
+            total_sources = len(ranked_cids)
+            per_source_count = distribute_download_count(download_count, total_sources)
+            for index, cid in enumerate(ranked_cids, 1):
                 if not app_state.is_downloading:
                     break
-                cid = str(source.get('community_id', '')).strip()
-                if not cid:
-                    continue
                 status.update({
                     'phase': 'download',
-                    'message': f'Downloading source {index}/{len(sources)}: up to {per_source_count} posts',
+                    'message': f'Источник {index}/{total_sources}: до {per_source_count} постов',
                 })
                 save_cycle_status(status)
                 _download_source(cid, per_source_count)
@@ -707,11 +763,90 @@ def _run_cycle_worker(settings: Dict) -> None:
         app_state.is_publishing = True
         publish_worker(publish_count)
 
+        # Видео и клипы — после фото, если включены в профиле
+        try:
+            from workers.download import run_media_autopilot
+            status.update({'phase': 'media', 'message': 'Video/clips autopilot'})
+            save_cycle_status(status)
+            run_media_autopilot()
+        except Exception as e:
+            app_state.add_log(f'Growth cycle media: {e}', 'warning')
+
+        # Заполнить пустые слоты в уже занятых днях очереди VK
+        try:
+            from services.slot_finder import find_empty_slots, fill_slots_with_queue, fetch_postponed_timestamps
+            from services.engagement import load_engagement_model
+            from vk.api import get_vk_api
+            remaining = len(list(app_state.posts_dir.glob('*.json')))
+            if remaining > 0:
+                vk_cfg = app_state.profile.get('vk', {})
+                group_token = vk_cfg.get('group_token', '').strip()
+                group_id = vk_cfg.get('group_id', '').strip()
+                user_token = vk_cfg.get('user_token', '').strip()
+                if group_token and group_id and user_token:
+                    status.update({'phase': 'fill_slots', 'message': 'Заполняю пустые слоты'})
+                    save_cycle_status(status)
+                    api_ver = vk_cfg.get('api_version', '5.131')
+                    vk_user = get_vk_api(user_token, api_ver)
+                    vk_group = get_vk_api(group_token, api_ver)
+                    # user_token нужен для чтения postponed (group_token не имеет доступа)
+                    postponed = fetch_postponed_timestamps(vk_user, group_id)
+                    model = load_engagement_model(app_state.active_profile_id)
+                    empty_slots = find_empty_slots(
+                        postponed, app_state.profile, model,
+                        max_slots=20, profile_id=app_state.active_profile_id,
+                    )
+                    if empty_slots:
+                        result = fill_slots_with_queue(
+                            empty_slots, app_state.posts_dir, vk_user, vk_group, group_id,
+                            app_state.profile, app_state.add_log,
+                        )
+                        filled = result.get('filled', 0)
+                        if filled:
+                            app_state.add_log(f'Цикл: заполнено {filled} пустых слотов', 'info')
+                            _save_bot_change(f'Заполнено {filled} пустых слотов в очереди VK')
+        except Exception as e:
+            app_state.add_log(f'Цикл: fill_slots: {e}', 'warning')
+
+        # Авто-синхронизация статистики: подтягиваем views/likes из VK
+        try:
+            from services.tracker import run_check
+            status.update({'phase': 'stats', 'message': 'Syncing stats from VK'})
+            save_cycle_status(status)
+            run_check()
+            app_state.add_log('Цикл: статистика синхронизирована', 'info')
+        except Exception as e:
+            app_state.add_log(f'Цикл: синх. статистики: {e}', 'warning')
+
+        # Обучение — смешиваем сигнал своих постов + конкурентов
+        try:
+            from services.learning import run_learning_cycle
+            status.update({'phase': 'learn', 'message': 'Обучение: анализ конкурентов и своих постов'})
+            save_cycle_status(status)
+            learn_result = run_learning_cycle()
+            if learn_result.get('applied_changes'):
+                for change in learn_result['applied_changes']:
+                    _save_bot_change(change)
+        except Exception as e:
+            app_state.add_log(f'Цикл: обучение: {e}', 'warning')
+
+        # Авто-анализ и применение рекомендаций (posts_per_day, часы)
+        try:
+            rec_result = build_algorithmic_recommendations()
+            if rec_result.get('auto_applied'):
+                rec = rec_result.get('recommendation', {})
+                _save_bot_change(
+                    f'{rec.get("posts_per_day", "?")} постов/день, '
+                    f'часы: {rec.get("hours", [])[:6]} — {rec.get("reason", "")}'
+                )
+        except Exception as e:
+            app_state.add_log(f'Цикл: авто-анализ: {e}', 'warning')
+
         status.update({
             'running': False,
             'phase': 'done',
             'finished_at': datetime.now().strftime('%d.%m.%Y %H:%M:%S'),
-            'message': f'Cycle finished: {publish_count} posts sent to publish flow',
+            'message': f'Цикл завершён: {publish_count} постов в очередь VK',
         })
         save_cycle_status(status)
     except Exception as e:
@@ -732,8 +867,14 @@ def start_cycle(settings: Optional[Dict] = None) -> Dict:
     if app_state.is_downloading or app_state.is_publishing:
         return {'status': 'error', 'message': 'Download or publish is already running'}
 
-    settings = normalize_settings(settings or load_growth_settings())
-    t = threading.Thread(target=_run_cycle_worker, args=(settings,), daemon=True, name='growth_cycle')
+    # Берём настройки из профиля — бот сам знает что делать.
+    # UI-override применяется только если явно передан (пользователь поменял вручную).
+    base = load_growth_settings()
+    if settings:
+        base.update({k: v for k, v in settings.items() if v is not None})
+    final_settings = normalize_settings(base)
+
+    t = threading.Thread(target=_run_cycle_worker, args=(final_settings,), daemon=True, name='growth_cycle')
     t.start()
     save_cycle_status({
         'running': True,
@@ -741,7 +882,7 @@ def start_cycle(settings: Optional[Dict] = None) -> Dict:
         'started_at': datetime.now().strftime('%d.%m.%Y %H:%M:%S'),
         'message': 'Cycle queued',
     })
-    return {'status': 'ok', 'message': 'Cycle started'}
+    return {'status': 'ok', 'message': 'Цикл запущен'}
 
 
 def build_algorithmic_recommendations() -> Dict:
@@ -790,9 +931,25 @@ def build_algorithmic_recommendations() -> Dict:
             'horizon_days': int(current_cycle.get('horizon_days') or 2),
         },
     }
+    # Авто-применение рекомендаций если включено в профиле (по умолчанию True)
+    auto_apply = app_state.profile.get('growth_autopilot', {}).get('auto_apply_recommendations', True)
+    applied = False
+    if auto_apply:
+        try:
+            apply_profile_patch(patch)
+            applied = True
+            app_state.add_log(
+                f'Анализ: авто-применены рекомендации — {recommended_posts_per_day} постов/день, '
+                f'часы: {recommended_hours[:8]}',
+                'info',
+            )
+        except Exception as e:
+            app_state.add_log(f'Анализ: не удалось применить рекомендации: {e}', 'warning')
+
     return {
         'status': 'ok',
         'summary': summary,
+        'auto_applied': applied,
         'recommendation': {
             'posts_per_day': recommended_posts_per_day,
             'hours': recommended_hours[:8],

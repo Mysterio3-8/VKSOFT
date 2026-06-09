@@ -82,6 +82,13 @@ async function startScan(auto) {
     return;
   }
 
+  // Проверяем что токен задан
+  const statusCheck = await fetch('/api/niche/results').then(r => r.json()).catch(() => ({}));
+  if (statusCheck.token_ok === false) {
+    setStatus('⚠️ User Token не задан. Зайди в Настройки → VK и введи user_token.');
+    return;
+  }
+
   setStatus('Запускаю анализ…');
   document.getElementById('resultsSection').style.display = 'none';
   document.getElementById('progressSection').style.display = 'block';
@@ -131,8 +138,16 @@ async function fetchResults() {
 
     if (data.status === 'done' && data.results.length > 0) {
       renderResults(data.results);
+    } else if (data.status === 'done' && data.results.length === 0) {
+      setStatus('Анализ завершён, но сообществ не найдено. Попробуйте другие ключевые слова.');
     } else if (data.status === 'idle') {
-      setStatus('Нет результатов. Запустите анализ.');
+      if (data.token_ok === false) {
+        setStatus('⚠️ User Token не задан в Настройках → VK. Без токена поиск не работает.');
+      } else if (data.last_error) {
+        setStatus('Ошибка: ' + data.last_error);
+      } else {
+        setStatus('Нет результатов. Запустите анализ.');
+      }
     }
   } catch (e) {
     clearInterval(pollTimer);

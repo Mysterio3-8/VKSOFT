@@ -66,7 +66,7 @@ def _download_source(community_id: str, count: int):
     delay_max = float(dl_cfg.get('delay_max', 3))
     if delay_min > delay_max:
         delay_min, delay_max = delay_max, delay_min
-    check_dup = dl_cfg.get('check_duplicates', True)
+    check_dup = dl_cfg.get('check_duplicates', False)
 
     allow_video = profile.get('processing', {}).get('allow_video', False)
 
@@ -78,7 +78,7 @@ def _download_source(community_id: str, count: int):
 
     # в”Ђв”Ђ РџСѓРЅРєС‚ 6: phash РґРµРґСѓРїР»РёРєР°С†РёСЏ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     phash_cfg = profile.get('phash', {})
-    phash_enabled   = phash_cfg.get('enabled', False)
+    phash_enabled = False
     phash_threshold = int(phash_cfg.get('threshold', 10))
 
     saved_offset = read_offsets().get(str(community_id), 0)

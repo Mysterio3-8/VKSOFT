@@ -25,6 +25,8 @@
     <button class="nav-item" data-tab="settings">Настройки</button>
     <button class="nav-item" data-tab="media">Медиа</button>
     <button class="nav-item" data-tab="library">Библиотека</button>
+    <button class="nav-item" data-tab="monitor">Мониторинг</button>
+    <button class="nav-item" data-tab="allstats">Все каналы</button>
     <button class="nav-item" data-tab="logs">Логи</button>
     <button class="nav-item" onclick="window.location='/niche'">Ниши</button>
   </nav>
@@ -52,72 +54,167 @@
         <div class="stat-card stat-card-errors" id="statErrorsCard">
           <div class="stat-label">Ошибок сегодня</div>
           <div class="stat-value" id="statErrors">0</div>
-          <div class="stat-sub">смотри логи</div>
+          <div class="stat-sub" id="statErrorsSub" style="cursor:pointer" onclick="switchTab('logs')">смотри логи</div>
         </div>
-        <div class="card status-card">
-          <div class="card-header"><div class="card-title">Статус</div></div>
-          <div class="health-grid">
-            <span class="health-item" id="healthDownload">Загрузка: <b>-</b></span>
-            <span class="health-item" id="healthPublish">Публикация: <b>-</b></span>
-            <span class="health-item" id="healthMonitor">Новости: <b>-</b></span>
-            <span class="health-item">Очередь: <b id="queueCount">0</b></span>
-          </div>
+        <div class="stat-card flat">
+          <div class="stat-label">Очередь</div>
+          <div class="stat-value" id="queueCount">0</div>
+          <div class="stat-sub">постов готово</div>
         </div>
       </div>
 
+      <!-- скрытые элементы для JS-совместимости -->
+      <div style="display:none">
+        <span id="healthDownload"><b></b></span>
+        <span id="healthPublish"><b></b></span>
+        <span id="healthMonitor"><b></b></span>
+        <div data-compat="downloadMenu"></div>
+        <button data-compat="btnDownloadMenu"></button>
+        <button data-compat="btnPublishQueue"></button>
+        <button data-compat="btnStopDownload"></button>
+        <button data-compat="btnStopPublish"></button>
+        <input data-compat="quickPublishCount" value="2">
+        <div data-compat="progressTitle"></div>
+        <span data-compat="progressPercent"></span>
+        <div data-compat="downloadProgressBar"></div>
+        <div data-compat="downloadProgressText"></div>
+      </div>
+
+
+      <div class="card queue-card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Очередь и публикация</div>
+            <div class="card-subtitle">Скачать посты, поставить в VK и остановить процесс</div>
+          </div>
+          <div class="quick-publish">
+            <label class="form-label" for="quickPublishCount">Постов</label>
+            <input class="form-input" id="quickPublishCount" type="number" min="1" max="50" value="2">
+          </div>
+        </div>
+        <div class="queue-actions">
+          <div class="action-menu-wrap">
+            <button class="btn btn-primary action-btn" id="btnDownloadMenu" type="button" onclick="toggleDownloadMenu()">Скачать</button>
+            <div class="action-menu" id="downloadMenu"></div>
+          </div>
+          <button class="btn btn-secondary" id="btnPublishQueue" type="button" onclick="publishQueue()">Опубликовать очередь</button>
+          <button class="btn btn-ghost" id="btnStopDownload" type="button" onclick="stopDownload()">Стоп скачивание</button>
+          <button class="btn btn-ghost" id="btnStopPublish" type="button" onclick="stopPublish()">Стоп публикация</button>
+        </div>
+        <div class="progress-block">
+          <div class="progress-meta">
+            <span id="progressTitle">Ожидание</span>
+            <span id="progressPercent">0%</span>
+          </div>
+          <div class="progress-track"><div class="progress-fill" id="downloadProgressBar"></div></div>
+          <div class="form-hint" id="downloadProgressText">Нет активной задачи</div>
+        </div>
+      </div>
 
       <div class="card" id="dashboardGrowthCard">
         <div class="card-header">
-          <div class="card-title">Автопилот публикаций</div>
+          <div class="card-title">Автопилот</div>
         </div>
-        <div class="grid-4">
-          <div class="stat-card flat"><div class="stat-label">Канал</div><div class="stat-value small" id="dashGaChannel">-</div><div class="stat-sub" id="dashGaGroup">VK ID: -</div></div>
+
+        <!-- Главная кнопка -->
+        <div style="padding:12px 16px 8px">
+          <button class="btn btn-primary" style="width:100%;font-size:15px;padding:10px" onclick="gaStartCycle()" id="btnStartCycle">Запустить цикл</button>
+          <div class="form-hint" id="gaStatusText" style="margin-top:6px;text-align:center">Автопилот готов.</div>
+        </div>
+
+        <!-- Статистика -->
+        <div class="grid-4" style="padding:0 16px 8px">
           <div class="stat-card flat"><div class="stat-label">Подписчики</div><div class="stat-value" id="dashGaMembers">0</div><div class="stat-sub" id="dashGaMembersDiff">сегодня: 0</div></div>
-          <div class="stat-card flat"><div class="stat-label">Ср. просмотры</div><div class="stat-value" id="dashGaViews">0</div><div class="stat-sub" id="dashGaLikes">лайки: 0</div><div class="stat-sub" id="dashGaPhash" style="margin-top:2px">pHash: -</div></div>
-          <div class="stat-card flat"><div class="stat-label">Цикл</div><div class="stat-value small" id="dashGaCycle">ожидание</div><div class="stat-sub" id="dashGaQueue">очередь: 0</div></div>
-        </div>
-        <div class="form-section">
-          <div class="form-row-3">
-            <div class="form-group"><label class="form-label">Дней вперёд</label><input class="form-input" id="gaHorizonDays" type="number" min="1" max="7" value="2"></div>
-            <div class="form-group"><label class="form-label">Постов в день</label><input class="form-input" id="gaPostsPerDay" type="number" min="1" value="12"></div>
-            <div class="form-group"><label class="form-label">Мин. viral score</label><input class="form-input" id="gaMinScore" type="number" min="0" value="30"></div>
-          </div>
-          <div class="form-row">
-            <div class="form-group"><label class="form-label">Публиковать с</label><input class="form-input" id="gaHoursStart" type="number" min="0" max="23" value="8"></div>
-            <div class="form-group"><label class="form-label">Публиковать до</label><input class="form-input" id="gaHoursEnd" type="number" min="0" max="23" value="23"></div>
-          </div>
-          <div class="button-row">
-            <button class="btn btn-secondary" onclick="gaRunPlan()">Проверить план</button>
-            <button class="btn btn-primary" onclick="gaStartCycle()">Запустить цикл</button>
-            <button class="btn btn-ghost" onclick="gaAnalyze()">Анализ</button>
-            <button class="btn btn-secondary" id="dashGaApplyBtn" onclick="gaApplyRecommendation()" disabled>Применить рекомендацию</button>
-          </div>
-          <div class="form-hint" id="gaStatusText">Автопилот готов.</div>
+          <div class="stat-card flat"><div class="stat-label">Ср. просмотры</div><div class="stat-value" id="dashGaViews">0</div><div class="stat-sub" id="dashGaLikes">лайки: 0</div></div>
+          <div class="stat-card flat"><div class="stat-label">Очередь VK</div><div class="stat-value" id="dashGaQueue2">0</div><div class="stat-sub">отложенных</div></div>
+          <div class="stat-card flat"><div class="stat-label">Цикл</div><div class="stat-value small" id="dashGaCycle">ожидание</div><div class="stat-sub" id="dashGaQueue">сегодня: 0</div></div>
         </div>
 
-        <div class="grid-3" style="padding:0 16px 8px">
-          <div class="stat-card flat"><div class="stat-label">Кандидатов</div><div class="stat-value" id="gaCandidateCount">0</div><div class="stat-sub">после фильтров</div></div>
-          <div class="stat-card flat"><div class="stat-label">Запланировано</div><div class="stat-value" id="gaScheduledCount">0</div><div class="stat-sub">предпросмотр</div></div>
-          <div class="stat-card flat"><div class="stat-label">Очередь</div><div class="stat-value" id="gaQueueCount">0</div><div class="stat-sub">локальных файлов</div></div>
+        <!-- Что бот поменял -->
+        <div style="padding:0 16px 12px">
+          <div onclick="toggleAccordion('gaBotChangesBody', this)" style="cursor:pointer;display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--muted)">
+            <span>Бот поменял автоматически</span><span class="accordion-chevron">▼</span>
+          </div>
+          <div id="gaBotChangesBody" style="display:none">
+            <div id="gaBotChangesList" class="form-section"><div class="form-hint">Ещё нет изменений — запусти цикл.</div></div>
+          </div>
         </div>
 
-        <!-- Технические проверки, Лучшие кандидаты и План публикаций скрыты из UI
-             по запросу: данные считаются на бэкенде (нужны для расписания), но
-             не показываются. JS продолжает их заполнять в этот скрытый контейнер. -->
+        <!-- Скрытые элементы для JS-совместимости -->
         <div style="display:none">
+          <span id="dashGaChannel">-</span>
+          <span id="dashGaGroup">-</span>
+          <span id="dashGaPhash">-</span>
+          <button id="dashGaApplyBtn" onclick="gaApplyRecommendation()"></button>
+          <span id="gaCandidateCount">0</span>
+          <span id="gaScheduledCount">0</span>
+          <span id="gaQueueCount">0</span>
+          <input id="gaHorizonDays" value="2">
+          <input id="gaPostsPerDay" value="12">
+          <input id="gaMinScore" value="30">
+          <input id="gaHoursStart" value="0">
+          <input id="gaHoursEnd" value="23">
+          <input id="gaSourceMode" value="all">
+          <input id="gaSingleSourceId" value="">
           <div id="gaChecksBody"><div id="gaChecksList"></div></div>
           <div id="gaCandidatesBody"><table><tbody id="gaCandidatesBody_table"></tbody></table></div>
           <div id="gaScheduleBody"><div id="gaScheduleList"></div></div>
-        </div>
-
-        <div style="padding:0 16px 12px">
-          <div onclick="toggleAccordion('gaRecsBody', this)" style="cursor:pointer;display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--muted)">
-            <span>Рекомендации</span><span class="accordion-chevron">▼</span>
-          </div>
-          <div id="gaRecsBody" style="display:none"><div id="gaRecommendationBlock" class="form-section"><div class="form-hint">После публикаций нажми "Анализ".</div></div></div>
+          <div id="gaRecsBody"><div id="gaRecommendationBlock"></div></div>
         </div>
       </div>
 
+    </section>
+
+    <section class="tab-content" id="monitor">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Мониторинг новостей</div>
+            <div class="settings-actions">
+              <button class="btn btn-primary btn-sm" onclick="post('/monitor/start', {}, 'Мониторинг запущен')">Старт</button>
+              <button class="btn btn-secondary btn-sm" onclick="post('/monitor/stop', {}, 'Мониторинг остановлен')">Стоп</button>
+              <button class="btn btn-ghost btn-sm" onclick="loadMonitor()">Обновить</button>
+            </div>
+          </div>
+          <div class="form-section">
+            <div id="monitorStatus"></div>
+            <div class="form-row-3">
+              <div class="form-group"><label class="form-label">Интервал, мин</label><input class="form-input" id="monInterval" type="number" min="1"></div>
+              <div class="form-group"><label class="form-label">Макс. за цикл</label><input class="form-input" id="monMaxCycle" type="number" min="1"></div>
+              <div class="form-group"><label class="form-label">Дней догонять</label><input class="form-input" id="monCatchDays" type="number" min="1"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Мин. просмотров</label><input class="form-input" id="monMinViews" type="number" min="0"></div>
+              <div class="form-group"><label class="form-label">&nbsp;</label><button class="btn btn-primary" onclick="saveMonitorSettings()">Сохранить мониторинг</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">Источники мониторинга</div></div>
+          <div class="form-section">
+            <div id="monitorSources"></div>
+            <div class="form-row">
+              <input class="form-input" id="monSourceName" placeholder="Название">
+              <input class="form-input" id="monSourceId" placeholder="VK community ID">
+            </div>
+            <button class="btn btn-primary" onclick="addMonitorSource()">Добавить источник</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Лог мониторинга</div></div>
+        <div class="log-list" id="monitorLogList"></div>
+      </div>
+    </section>
+
+    <section class="tab-content" id="allstats">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Статистика по всем каналам</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadAllStats()">Обновить</button>
+        </div>
+        <div id="allStatsContent"></div>
+      </div>
     </section>
 
     <section class="tab-content" id="channels">
@@ -319,6 +416,11 @@
     </section>
   </div>
 </main>
-<script src="script.js?v=allstats-20260604"></script>
+<script src="js/core.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/channels.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/autopilot.js"></script>
+<script src="js/init.js"></script>
 </body>
 </html>

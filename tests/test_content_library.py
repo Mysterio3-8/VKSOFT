@@ -17,9 +17,10 @@ def test_universal_entries_avoid_seasonal_and_object_specific_words():
     )
 
     texts = " ".join(f"{item['text']} {item['tags']}" for item in UNIVERSAL_ENTRIES).lower()
+    offenders = [word for word in banned if word in texts]
 
     assert UNIVERSAL_ENTRIES
-    assert not any(word in texts for word in banned)
+    assert offenders == []
 
 
 def test_dedupe_hashtags_keeps_only_one_copy_case_insensitive():

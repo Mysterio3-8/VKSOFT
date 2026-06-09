@@ -42,52 +42,60 @@ vk-post-reposting-bot/
 ├── config.json                # Конфиг профилей (НЕ трогай руками)
 ├── requirements.txt           # pip зависимости
 ├── start.bat / stop.bat       # Windows управление процессом
-├── build.sh / build.bat       # CI/CD сборка
-├── setup_aeza.sh              # Развёртывание на AEZA (VPS)
 │
-├── vk/                        # VK API слой (API + загрузка фото)
+├── vk/                        # VK API слой
 │   ├── api.py                 # get_vk_api(), vk_call_safe(), fetch_last_postponed_from_vk()
 │   └── upload.py              # download_photos_for_post(), upload_photo_from_file()
 │
-├── services/                  # Бизнес-логика (хранилище, OCR, tracker, уборка)
+├── services/                  # Бизнес-логика (без HTTP)
 │   ├── storage.py             # read/write состояния (last_scheduled, offsets, stats)
-│   ├── telegram.py            # send_telegram(), send_critical_alert()
+│   ├── autopilot.py           # Safe organic-growth autopilot
+│   ├── growth_autopilot.py    # Growth Autopilot: скоринг, dry-run, цикл
+│   ├── learning.py            # Обучение на engagement данных
+│   ├── tracker.py             # Трекинг views/likes после публикации
+│   ├── competitor.py          # Анализ конкурентов
+│   ├── content_library.py     # Библиотека текстов и ниши
+│   ├── niche_analyzer.py      # Поиск и ранжирование ниш VK
+│   ├── smart_scheduler.py     # Умное расписание публикаций
+│   ├── slot_finder.py         # Поиск пустых слотов в очереди
+│   ├── engagement.py          # Проверка engagement постов
 │   ├── ocr.py                 # photo_has_text() через pytesseract
-│   ├── tracker.py             # hourly post_tracker, subscriber tracking
-│   ├── cleanup_storage.py     # удаление orphaned photos, стирание старых логов
-│   ├── brain.py               # Smart Brain аналитика (рекомендации по настройкам)
-│   └── google_image.py        # fetch_google_image() — запасной источник картинок
+│   ├── phash.py               # Перцептивное хэширование (дедупликация)
+│   ├── photo_transform.py     # Трансформации фото (антиплагиат)
+│   ├── video_transform.py     # ffmpeg-обработка видео/клипов
+│   ├── watermark.py           # Водяные знаки
+│   ├── google_image.py        # Запасной источник картинок
+│   ├── polls.py               # Генерация опросов
+│   ├── telegram.py            # send_telegram(), send_critical_alert()
+│   └── cleanup_storage.py     # Фоновая очистка storage
 │
-├── workers/                   # Воркеры (асинхронные фоновые задачи)
-│   ├── download.py            # download_worker() — скачивание постов из VK
-│   ├── publish.py             # publish_worker() — публикация в VK (с отложением)
-│   ├── autopilot.py           # autopilot_worker() — цикл скачивание + публикация
-│   ├── monitor.py             # monitor_worker() + _watchdog_loop() — мониторинг новостей
-│   └── growth_tasks.py        # subscriber_tracker_loop() — ежечасный трекинг подписчиков
+├── workers/                   # Фоновые задачи
+│   ├── download.py            # download_worker(), download_all_worker()
+│   ├── publish.py             # publish_worker() — публикация в VK
+│   ├── monitor.py             # monitor_worker() + _watchdog_loop()
+│   ├── external_publish.py    # Публикация медиа из папки
+│   ├── growth_tasks.py        # track_subscribers_once(), subscriber_tracker_loop()
+│   ├── photos.py              # Скачивание/публикация фото
+│   ├── videos.py              # Скачивание/публикация видео
+│   ├── clips.py               # Скачивание/публикация клипов
+│   └── stories.py             # Публикация stories
 │
-├── api/                       # FastAPI роутеры (по функциям)
-│   ├── __init__.py
-│   ├── config.py              # /api/config/* — сохранение/загрузка конфига
-│   ├── dashboard.py           # /api/dashboard/* — статистика, метрики
-│   ├── download.py            # /api/download/* — скачивание постов
-│   ├── publish.py             # /api/publish/* — публикация постов
-│   ├── autopilot.py           # /api/autopilot/* — управление автопилотом
-│   ├── monitor.py             # /api/monitor/* — управление мониторингом
-│   ├── profiles.py            # /api/profiles/* — управление профилями
-│   ├── sources.py             # /api/sources/* — управление источниками (VK сообщества)
-│   ├── statistics.py          # /api/statistics/* — статистика публикаций
-│   ├── growth.py              # /api/growth/* — метрики роста и аналитика
-│   ├── media.py               # /api/media/* — работа с фото/видео
-│   ├── library.py             # /api/library/* — контент-библиотека (хештеги, тексты)
-│   ├── cleanup.py             # /api/cleanup/* — очистка хранилища
-│   ├── logs.py                # /api/logs/* — получение логов
-│   ├── tests.py               # /api/tests/* — проверка токенов, diagnose
-│   └── (другие маршруты)
+├── api/                       # FastAPI роутеры (тонкий слой — только роутинг)
+│   ├── growth.py              # /api/growth/* (включает бывший growth_extra)
+│   ├── growth_autopilot.py    # /api/growth-autopilot/*
+│   ├── autopilot.py           # /api/autopilot/*
+│   └── ...                    # остальные роутеры
 │
-├── frontend/                  # React-like SPA (HTML/CSS/JS)
+├── frontend/                  # Vanilla JS SPA
 │   ├── index.html             # Главная страница
-│   ├── style.css              # Стили (не SCSS, прямой CSS)
-│   └── script.js              # Единый JS файл, vanilla JS (не React)
+│   ├── style.css              # Все стили
+│   └── js/                    # JS модули (разбит из script.js)
+│       ├── core.js            # state, api(), post(), notify(), switchTab()
+│       ├── dashboard.js       # loadDashboard(), profiles, allStats
+│       ├── channels.js        # renderProfiles(), renderSources(), download*()
+│       ├── settings.js        # renderSettings(), tokens, media, watermark
+│       ├── autopilot.js       # autopilot, growth autopilot, logs, monitor, library
+│       └── init.js            # DOMContentLoaded, интервалы опроса
 │
 ├── storage/
 │   └── {profile_id}/          # Изолированный storage для каждого профиля
@@ -464,25 +472,20 @@ ffmpeg делает разом:
 
 ---
 
-## Checkpoint (2026-06-07 20:53)
+## Checkpoint (2026-06-09 11:12)
 
 **Сделано:**
-- `services/competitor.py` — анализ конкурентов: топ посты по ER, heatmap по часам, тренды хештегов, статистика типов контента. Фоновый поток каждые 6ч.
-- `services/learning.py` — адаптивное обучение: смешивает сигнал своих постов + конкурентов, автоматически обновляет `peak_hours` в профиле. Фоновый поток каждый час.
-- `workers/videos.py` `download_top_competitor_videos()` — скачивает топ видео/клипы конкурентов отсортированные по ER
-- `workers/download.py` `run_media_autopilot()` — интеграция: если `learning.prefer_video=True` — доливает топ видео конкурентов
-- `workers/publish.py` — использует `get_smart_hashtags()` из learning при публикации (хештеги конкурентов с высоким ER)
-- `services/content_library.py` `compose_caption()` — поддержка `extra_tags` (выбирает 3 из конкурентских хештегов)
-- `api/growth.py` — 4 новых endpoint: `/growth/learning_state`, `/growth/learning_run`, `/growth/competitor_insights`, `/growth/competitor_scan`
+- Рефакторинг: удалены мусорные файлы (findings.md, progress.md, task_plan.md, update.md, CHANGES_SUMMARY.md, CLAUDE.md.backup, _build_clean_config.py, SETUP_COMPLETE.txt, README_USER.txt, build.bat, build.sh, setup_aeza.sh, server.log, docs/superpowers/)
+- `frontend/script.js` (1210 строк) разбит на 5 модулей в `frontend/js/`: core.js, dashboard.js, channels.js, settings.js, autopilot.js, init.js
+- `api/growth_extra.py` объединён в `api/growth.py` (удалён дубль), main.py обновлён
+- CLAUDE.md обновлён под реальную структуру
 
 **Активно:**
 - Нет незавершённого
 
 **Следующий шаг:**
-- Запустить бота, дать отработать competitor_scan_loop (~5 мин первый старт)
-- Проверить: `curl http://localhost:8000/api/growth/competitor_insights`
-- Проверить: `curl http://localhost:8000/api/growth/learning_state`
-- После 1ч проверить обновились ли peak_hours в config.json
+- Запустить `start.bat`, проверить что UI грузится (frontend/js/* подключены)
+- Опциональный рефакторинг: разбить большие services/ файлы (growth_autopilot.py 960 строк)
 
 **Блокеры:**
-- Нет (зелёно)
+- Нет

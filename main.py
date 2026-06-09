@@ -72,11 +72,6 @@ async def css():
     return FileResponse(FRONTEND_DIR / 'style.css', media_type='text/css; charset=utf-8')
 
 
-@app.get('/script.js')
-async def js():
-    return FileResponse(FRONTEND_DIR / 'script.js', media_type='application/javascript; charset=utf-8')
-
-
 @app.get('/health')
 async def health():
     return {'status': 'ok', 'version': '2.0', 'profile': app_state.active_profile_id}
@@ -97,7 +92,6 @@ from api.tests import router as tests_router
 from api.growth import router as growth_router
 from api.media import router as media_router
 from api.library import router as library_router
-from api.growth_extra import router as growth_extra_router
 from api.autopilot import router as autopilot_router
 from api.tokens import router as tokens_router
 from api.growth_autopilot import router as growth_autopilot_router
@@ -114,9 +108,8 @@ app.include_router(cleanup_router, prefix='/api')
 app.include_router(logs_router, prefix='/api')
 app.include_router(tests_router, prefix='/api')
 app.include_router(growth_router, prefix='/api')
-app.include_router(media_router,   prefix='/api')
-app.include_router(library_router,      prefix='/api')
-app.include_router(growth_extra_router, prefix='/api')
+app.include_router(media_router, prefix='/api')
+app.include_router(library_router, prefix='/api')
 app.include_router(autopilot_router, prefix='/api')
 app.include_router(tokens_router, prefix='/api')
 app.include_router(growth_autopilot_router, prefix='/api')

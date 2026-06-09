@@ -187,7 +187,7 @@ class AppState:
                 'posts_to_download': 100,
                 'delay_min': 2,
                 'delay_max': 5,
-                'check_duplicates': True,
+                'check_duplicates': False,
             },
             'publishing_settings': {
                 'posts_to_publish': 50,
@@ -202,24 +202,24 @@ class AppState:
                 'smart_schedule_enabled': True,
             },
             'processing': {
-                'add_hashtags': False,
+                'add_hashtags': True,
                 'hashtags': [],
                 'photo_only': False,
-                'allow_video': False,
+                'allow_video': True,
             },
             'watermark': {
-                'enabled': False,
-                'mode': 'text',        # 'text' или 'logo'
+                'enabled': False,   # включить после настройки текста/лого в настройках
+                'mode': 'text',
                 'text': '@channel',
                 'logo_path': '',
                 'position': 'bottom_right',
-                'font_size': 0,        # 0 = авто
+                'font_size': 0,
                 'opacity': 230,
                 'color': [255, 255, 255],
                 'logo_scale': 0.12,
             },
             'filters': {
-                'enable_auto_filters': False,
+                'enable_auto_filters': True,
                 'ad_stopper_enabled': True,
                 'ad_stop_keywords': [
                     'реклама', '#реклама', 'на правах рекламы', 'erid',
@@ -235,10 +235,10 @@ class AppState:
                 'min_content_length': 0,
             },
             'monitoring': {
-                'enabled': False,
-                'check_interval_min': 180,
+                'enabled': False,   # включить после добавления источников мониторинга
+                'check_interval_min': 120,
                 'catch_up_days': 3,
-                'max_per_cycle': 2,
+                'max_per_cycle': 3,
                 'sources': [],
                 'min_views': 0,
                 'ocr_filter': False,
@@ -251,10 +251,16 @@ class AppState:
                 'clear_text': True,
                 'max_photos': 4,
                 'remove_photo': 'random',
+                'transforms': {
+                    'crop': True,
+                    'color_shift': True,
+                    'mirror': False,
+                    'strip_metadata': True,
+                },
             },
             'engagement': {
-                'enabled': False,
-                'min_ratio': 0.5,   # % лайков от просмотров
+                'enabled': True,
+                'min_ratio': 0.1,
                 'min_likes': 0,
             },
             'peak_hours': {
@@ -262,9 +268,9 @@ class AppState:
                 'hours': [8, 10, 13, 17, 19, 21],
             },
             'autopilot': {
-                'enabled': False,
-                'dry_run': True,
-                'live_enabled': False,
+                'enabled': True,
+                'dry_run': False,
+                'live_enabled': True,
                 'cycle_interval_min': 180,
                 'target_queue_days': 5,
                 'daily_posts_min': 4,
@@ -300,7 +306,7 @@ class AppState:
                 'max_per_run': 5,
             },
             'phash': {
-                'enabled': True,
+                'enabled': False,
                 'threshold': 10,
             },
             'tracking': {
@@ -319,7 +325,7 @@ class AppState:
             },
             'videos_settings': {
                 'enabled': True,
-                'autopilot': False,        # участвует ли видео в автопилоте
+                'autopilot': True,         # участвует ли видео в автопилоте
                 'videos_per_run': 10,
                 'publish_delay_min': 10800,
                 'publish_delay_max': 21600,
@@ -331,7 +337,7 @@ class AppState:
             },
             'clips_settings': {
                 'enabled': True,
-                'autopilot': False,        # участвуют ли клипы в автопилоте
+                'autopilot': True,         # участвуют ли клипы в автопилоте
                 'clips_per_run': 10,
                 'publish_delay_min': 10800,
                 'publish_delay_max': 21600,
@@ -363,8 +369,8 @@ class AppState:
                 'interval_hours': 6,
             },
             'polls': {
-                'enabled': False,
-                'frequency': 5,
+                'enabled': True,
+                'frequency': 7,
                 'is_anonymous': True,
                 'multiple': False,
                 'questions': [

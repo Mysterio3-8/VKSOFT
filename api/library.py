@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """API управления библиотекой текстов и опросов."""
 
+import uuid
+
 from fastapi import APIRouter
 from services.content_library import (
     load_library, save_library, DEFAULT_ENTRIES, DEFAULT_POLLS,
-    NICHE_PRESETS, NICHE_LABELS, apply_niche_preset,
+    NICHE_PRESETS, NICHE_LABELS, apply_niche_preset, DEFAULT_PROMO_MESSAGES,
 )
 
 router = APIRouter()
@@ -117,3 +119,87 @@ async def delete_poll(idx: int):
         save_library(lib)
         return {'status': 'ok'}
     return {'status': 'error', 'message': 'Index out of range'}
+
+
+# ── Promo messages ────────────────────────────────────────────────────────
+
+@router.get('/library/promo')
+async def get_promo():
+    lib = load_library()
+    return {
+        'status': 'ok',
+        'promo_enabled': lib.get('promo_enabled', False),
+        'promo_messages': lib.get('promo_messages', []),
+    }
+
+
+@router.post('/library/promo/toggle')
+async def toggle_promo(data: dict):
+    lib = load_library()
+    lib['promo_enabled'] = bool(data.get('enabled', False))
+    save_library(lib)
+    return {'status': 'ok', 'promo_enabled': lib['promo_enabled']}
+
+
+@router.post('/library/promo/add')
+async def add_promo(data: dict):
+    lib = load_library()
+    messages = lib.get('promo_messages', [])
+    new_msg = {
+        'id': str(uuid.uuid4())[:8],
+        'name': data.get('name', 'Новое сообщение'),
+        'text': data.get('text', ''),
+        'hashtags': data.get('hashtags', ''),
+        'active': len(messages) == 0,
+    }
+    messages.append(new_msg)
+    lib['promo_messages'] = messages
+    save_library(lib)
+    return {'status': 'ok', 'count': len(messages)}
+
+
+@router.post('/library/promo/activate/{msg_id}')
+async def activate_promo(msg_id: str):
+    lib = load_library()
+    messages = lib.get('promo_messages', [])
+    found = False
+    for m in messages:
+        m['active'] = m.get('id') == msg_id
+        if m['active']:
+            found = True
+    if not found:
+        return {'status': 'error', 'message': 'Сообщение не найдено'}
+    lib['promo_messages'] = messages
+    save_library(lib)
+    return {'status': 'ok'}
+
+
+@router.post('/library/promo/update/{msg_id}')
+async def update_promo(msg_id: str, data: dict):
+    lib = load_library()
+    messages = lib.get('promo_messages', [])
+    for m in messages:
+        if m.get('id') == msg_id:
+            if 'name' in data:
+                m['name'] = data['name']
+            if 'text' in data:
+                m['text'] = data['text']
+            if 'hashtags' in data:
+                m['hashtags'] = data['hashtags']
+            lib['promo_messages'] = messages
+            save_library(lib)
+            return {'status': 'ok'}
+    return {'status': 'error', 'message': 'Сообщение не найдено'}
+
+
+@router.delete('/library/promo/{msg_id}')
+async def delete_promo(msg_id: str):
+    lib = load_library()
+    messages = lib.get('promo_messages', [])
+    messages = [m for m in messages if m.get('id') != msg_id]
+    # Если удалили активное — активируем первое
+    if messages and not any(m.get('active') for m in messages):
+        messages[0]['active'] = True
+    lib['promo_messages'] = messages
+    save_library(lib)
+    return {'status': 'ok', 'count': len(messages)}

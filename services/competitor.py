@@ -230,6 +230,7 @@ def scan_all_competitors() -> dict[str, Any]:
             continue
 
         logger.info(f'competitor: сканирую {cid}')
+        app_state.add_log(f'[Конкуренты] Сканирую {cid}', 'info')
         result = scan_competitor(cid)
         if result:
             data[cid] = result
@@ -237,6 +238,11 @@ def scan_all_competitors() -> dict[str, Any]:
             logger.info(
                 f'competitor {cid}: {result["total_posts"]} постов, '
                 f'avg_er={result["avg_er"]}, best_hours={result["best_hours"]}'
+            )
+            app_state.add_log(
+                f'[Конкуренты] {cid}: {result["total_posts"]} постов, '
+                f'avg_er={result["avg_er"]:.2f}, часы={result["best_hours"][:3]}',
+                'info'
             )
         time.sleep(1.0)
 
@@ -299,6 +305,12 @@ def aggregate_competitors(data: dict) -> dict:
         default='photo',
     )
 
+    # ER каждого источника — для ранжирования при скачивании
+    source_er = {
+        cid: round(float(source.get('avg_er', 0.0)), 4)
+        for cid, source in data.items()
+    }
+
     return {
         'updated_at': int(time.time()),
         'sources_count': len(data),
@@ -310,6 +322,7 @@ def aggregate_competitors(data: dict) -> dict:
             t: round(sum(ers) / len(ers), 4)
             for t, ers in all_content_stats.items()
         },
+        'source_er': source_er,
     }
 
 
@@ -327,9 +340,10 @@ def competitor_scan_loop():
         try:
             result = scan_all_competitors()
             if result:
-                logger.info(
-                    f'competitor scan: done, recommended_hours={result.get("recommended_hours")}'
-                )
+                hours = result.get('recommended_hours', [])
+                logger.info(f'competitor scan: done, recommended_hours={hours}')
+                app_state.add_log(f'[Конкуренты] Скан завершён, рекомендуемые часы: {hours}', 'info')
         except Exception as e:
             logger.warning(f'competitor_scan_loop: {e}')
+            app_state.add_log(f'[Конкуренты] Ошибка скана: {e}', 'error')
         time.sleep(SCAN_INTERVAL_SEC)

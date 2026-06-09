@@ -203,12 +203,109 @@ def run_check():
                 avg = sum(p['views'] for p in checked) / len(checked)
                 very_low = [p for p in checked[-20:] if p['views'] < avg * 0.3]
                 if len(very_low) >= 3:
-                    logger.warning(
-                        f'Низкий охват: {len(very_low)} постов получили меньше 30% от среднего ({int(avg)} просм.)'
-                    )
+                    msg = f'Низкий охват: {len(very_low)} постов < 30% от среднего ({int(avg)} просм.)'
+                    logger.warning(msg)
+                    app_state.add_log(f'[Трекер] ⚠️ {msg}', 'warning')
 
     except Exception as e:
         logger.warning(f'tracker run_check: {e}')
+        app_state.add_log(f'[Трекер] Ошибка проверки: {e}', 'error')
+
+
+def bootstrap_from_wall():
+    """Подтянуть всю историю постов со стены своей группы в трекер.
+
+    Вызывается при старте. Постранично читает wall.get до тех пор пока
+    не встретит только уже известные посты (значит дальше всё старое).
+    Сразу проставляет views/likes — посты уже вышли, ждать 24ч не нужно.
+    """
+    from vk.api import get_vk_api, vk_call_safe
+
+    profile = app_state.profile
+    vk_cfg = profile.get('vk', {})
+    user_token = vk_cfg.get('user_token', '').strip()
+    group_id = str(vk_cfg.get('group_id', '')).strip().lstrip('-')
+    if not user_token or not group_id:
+        return
+
+    try:
+        vk = get_vk_api(user_token, vk_cfg.get('api_version', '5.131'))
+        owner_id = f'-{group_id}'
+
+        data = _load()
+        known_ids = {p['post_id'] for p in data}
+
+        all_new: list = []
+        offset = 0
+        batch_size = 100
+
+        while True:
+            resp = vk_call_safe(vk.wall.get, owner_id=owner_id, count=batch_size, offset=offset, filter='owner')
+            items = (resp.get('items', []) if isinstance(resp, dict) else []) or []
+            if not items:
+                break
+
+            new_in_batch = 0
+            for item in items:
+                pid = item.get('id')
+                if not pid or pid in known_ids:
+                    continue
+                known_ids.add(pid)
+                all_new.append({
+                    'post_id': pid,
+                    'owner_id': owner_id,
+                    'source_cid': '',
+                    'published_at': int(item.get('date', time.time())),
+                    'checked': False,
+                    'likes': 0,
+                    'views': 0,
+                    'reposts': 0,
+                    '_bootstrapped': True,
+                })
+                new_in_batch += 1
+
+            # Страница полностью из известных — дальше только старьё
+            if new_in_batch == 0:
+                break
+
+            offset += batch_size
+            time.sleep(0.4)
+
+        if not all_new:
+            logger.info('tracker bootstrap: нет новых постов для добавления')
+            return
+
+        # Сразу проставляем stats — посты уже вышли
+        for i in range(0, len(all_new), 25):
+            batch = all_new[i:i + 25]
+            try:
+                ids = ','.join(f'{p["owner_id"]}_{p["post_id"]}' for p in batch)
+                stat_resp = vk_call_safe(vk.wall.getById, posts=ids, extended=1)
+                stat_items = (stat_resp.get('items', []) if isinstance(stat_resp, dict) else stat_resp) or []
+                stats_map = {s['id']: s for s in stat_items}
+                for p in batch:
+                    s = stats_map.get(p['post_id'])
+                    if s:
+                        p['likes'] = s.get('likes', {}).get('count', 0)
+                        p['views'] = s.get('views', {}).get('count', 0)
+                        p['reposts'] = s.get('reposts', {}).get('count', 0)
+                        p['checked'] = True
+                    else:
+                        p['checked'] = True
+                        p['missing'] = True
+                time.sleep(0.3)
+            except Exception as e:
+                logger.warning(f'tracker bootstrap batch: {e}')
+
+        data.extend(all_new)
+        _save(data)
+        with_views = sum(1 for p in all_new if p.get('views', 0) > 0)
+        logger.info(f'tracker bootstrap: добавлено {len(all_new)} постов, {with_views} с views>0')
+        app_state.add_log(f'[Трекер] Загружено {len(all_new)} постов, {with_views} с просмотрами', 'info')
+
+    except Exception as e:
+        logger.warning(f'tracker bootstrap_from_wall: {e}')
+        app_state.add_log(f'[Трекер] Ошибка загрузки: {e}', 'error')
 
 
 def tracker_loop():

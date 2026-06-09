@@ -46,11 +46,27 @@ def upload_photo_from_file(vk_user, group_id_num: int, photo_path) -> str:
             server = vk_user.photos.getWallUploadServer(group_id=group_id_num)
             up_url = server['upload_url']
             with open(photo_path, 'rb') as fh:
-                up_resp = req_lib.post(
+                response = req_lib.post(
                     up_url,
                     files={'photo': (photo_path.name, fh, 'image/jpeg')},
                     timeout=60
-                ).json()
+                )
+            try:
+                up_resp = response.json()
+            except ValueError as e:
+                body = (getattr(response, 'text', '') or '')[:200]
+                status = getattr(response, 'status_code', 'unknown')
+                if attempt < 2:
+                    app_state.add_log(
+                        f'Загрузка фото: VK upload вернул не-JSON (status={status}, body={body!r}), повтор',
+                        'warning'
+                    )
+                    continue
+                app_state.add_log(
+                    f'Загрузка фото: VK upload вернул не-JSON после 3 попыток (status={status}, body={body!r}): {e}',
+                    'error'
+                )
+                return None
             if not up_resp.get('photo'):
                 app_state.add_log(f'VK не принял фото: {up_resp}', 'error')
                 return None

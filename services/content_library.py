@@ -298,6 +298,23 @@ def _lib_file(profile_id: str = None) -> Path:
     return STORAGE_DIR / pid / 'content_library.json'
 
 
+DEFAULT_PROMO_MESSAGES = [
+    {
+        'id': 'marathon_1m',
+        'name': '🌿 Марафон 1 000 000',
+        'text': (
+            '🌿 НАША ЦЕЛЬ — 1 000 000 ПОДПИСЧИКОВ\n\n'
+            'Каждый день страдает живая природа, а большинство уверены, что ничего не могут изменить.\n'
+            'Мы хотим доказать обратное.\n\n'
+            'Подпишитесь. Поставьте лайк. Поделитесь.\n'
+            'Именно так начинаются большие изменения. 🌍'
+        ),
+        'hashtags': '#природа #экология #марафон #1000000 #земля',
+        'active': True,
+    },
+]
+
+
 def _default_lib() -> dict:
     return {
         'enabled': False,
@@ -307,6 +324,8 @@ def _default_lib() -> dict:
         'entries': list(UNIVERSAL_ENTRIES),
         'polls': list(DEFAULT_POLLS),
         'ctas': list(UNIVERSAL_CTAS),
+        'promo_messages': list(DEFAULT_PROMO_MESSAGES),
+        'promo_enabled': False,
     }
 
 
@@ -329,6 +348,10 @@ def _normalize_library(data: dict) -> dict:
         lib['polls'] = list(DEFAULT_POLLS)
     if not isinstance(lib.get('ctas'), list):
         lib['ctas'] = list(UNIVERSAL_CTAS)
+    if not isinstance(lib.get('promo_messages'), list):
+        lib['promo_messages'] = list(DEFAULT_PROMO_MESSAGES)
+    if 'promo_enabled' not in lib:
+        lib['promo_enabled'] = False
     return app_state._repair_human_text(lib)
 
 
@@ -366,6 +389,24 @@ def apply_niche_preset(niche: str, profile_id: str = None) -> bool:
     lib['ctas'] = list(preset['ctas'])
     save_library(lib, profile_id)
     return True
+
+
+def get_active_promo_message(profile_id: str = None) -> str | None:
+    lib = load_library(profile_id)
+    if not lib.get('promo_enabled', False):
+        return None
+    messages = lib.get('promo_messages') or []
+    active = next((m for m in messages if m.get('active')), None)
+    if not active:
+        return None
+    parts = []
+    text = (active.get('text') or '').strip()
+    if text:
+        parts.append(text)
+    tags = (active.get('hashtags') or '').strip()
+    if tags:
+        parts.append(tags)
+    return '\n\n'.join(parts) if parts else None
 
 
 def get_random_entry() -> dict:
@@ -444,8 +485,8 @@ def compose_caption(
 
     all_profile_tags = list(profile_tags or [])
     if extra_tags:
-        # Добавляем несколько хештегов от конкурентов (не все — не спамим)
-        chosen = random.sample(extra_tags, min(3, len(extra_tags)))
+        # Добавляем хештеги от конкурентов (до 7 — баланс охвата и спама)
+        chosen = random.sample(extra_tags, min(7, len(extra_tags)))
         all_profile_tags.extend(chosen)
 
     tags = dedupe_hashtags(lib_tags if add_tags else '', all_profile_tags if add_profile_tags else None)
