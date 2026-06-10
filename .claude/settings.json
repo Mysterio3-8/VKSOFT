@@ -8,8 +8,8 @@
       },
       {
         "matcher": "Write|Edit",
-        "command": "cd '/c/Users/Professional/Desktop/vk-post-reposting-bot/vk-post-reposting-bot' && git add -A && git diff --cached --quiet || git commit -m \"chore: auto-commit after edit [$(date +'%H:%M')]\"",
-        "description": "Автокоммит изменений в git после каждого редактирования"
+        "command": "cd '/c/Users/Professional/Desktop/vk-post-reposting-bot/vk-post-reposting-bot' && git add -A && git diff --cached --quiet || (git commit -m \"chore: auto-commit after edit [$(date +'%H:%M')]\" && git push)",
+        "description": "Автокоммит + пуш в git после каждого редактирования"
       }
     ]
   },

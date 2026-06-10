@@ -1,6 +1,11 @@
 ---
 paths:
-  - "*.py"
+  - "main.py"
+  - "config.py"
+  - "api/**/*.py"
+  - "services/**/*.py"
+  - "workers/**/*.py"
+  - "vk/**/*.py"
 ---
 
 # VK Bot — Инварианты кода

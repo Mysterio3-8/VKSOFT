@@ -1,39 +1,40 @@
 ---
-description: Очистить orphaned photos и старые логи
+description: Очистить orphaned-файлы, мусор и медиа-очереди текущего профиля
 ---
 
 # /cleanup
 
-Удаляет:
-1. **Orphaned photos** — папки с фото, у которых нет JSON (если бот упал)
-2. **Старые логи** — логи старше 30 дней
-3. **Стирает pHash кеш** — seen_photos.json (если размер >10MB)
+Все операции работают на **активном профиле** (`app_state.active_profile_id`) и
+блокируются, если в данный момент идёт скачивание/публикация (`is_storage_busy()`).
 
-## Команда
+## Посмотреть статус хранилища
 
 ```bash
-curl -X POST http://localhost:8000/api/cleanup/orphaned_photos
+Invoke-RestMethod http://localhost:8000/api/cleanup/status
 ```
 
-## Вручную очистить всё
+## Доступные операции
 
-```bash
-# На Windows (PowerShell)
-$profile_dir = "C:\Users\Professional\Desktop\vk-post-reposting-bot\vk-post-reposting-bot\storage\p1"
-Remove-Item "$profile_dir\photos\*" -Recurse -Force
-
-# На Linux/Mac
-rm -rf /c/Users/Professional/Desktop/vk-post-reposting-bot/vk-post-reposting-bot/storage/p1/photos/*
-```
+| Что | Команда | Что делает |
+|---|---|---|
+| Старые скачанные посты | `Invoke-RestMethod -Method Post http://localhost:8000/api/cleanup/posts` | `cleanup_downloaded_posts()` — удаляет посты из очереди старше 0 дней (фактически — все, у кого истёк смысл хранить) |
+| Мусор / orphaned | `Invoke-RestMethod -Method Post http://localhost:8000/api/cleanup/junk` | `cleanup_junk()` — папки фото без JSON, временные файлы |
+| Медиа-очереди (фото/видео/клипы) | `Invoke-RestMethod -Method Post http://localhost:8000/api/cleanup/media` | `cleanup_media_queues()` |
+| Полная очистка | `Invoke-RestMethod -Method Post http://localhost:8000/api/cleanup/all` | Всё вышеперечисленное + сброс статистики, `last_scheduled.txt`, `download_offsets.json`, логов в памяти |
 
 ## Безопасность
 
-- **Проверка:** удаляет ТОЛЬКО папки без соответствующего JSON в `downloaded_posts/`
-- **Лог:** все удаления логируются в `bot.log`
-- **Восстановление:** если случайно удалил нужное — в `bot.log` видно что удалилось
+- `cleanup_junk()` удаляет только папки фото, для которых **нет** соответствующего JSON в `downloaded_posts/`.
+- Все удаления логируются (`app_state.add_log`, уровень `warning`) → видно в `/logs` и `logs/bot.log`.
+- `/api/cleanup/all` — необратимо сбрасывает статистику и прогресс. Использовать только по явной просьбе пользователя.
 
 ## Когда использовать
 
-1. После краша бота (`is_publishing = true`, но посты не публикуются)
-2. Хранилище растёт без причины
-3. Перед деплоем на продакшен
+1. После краша бота — могли остаться папки фото без JSON.
+2. Хранилище профиля заметно растёт без причины.
+3. Пользователь просит "почистить очередь" / "сбросить статистику".
+
+## Фоновая очистка
+
+Есть автоматический `cleanup_loop()` (см. `services/cleanup_storage.py`), запускается
+в `main.py` при старте — не требует ручного вызова в обычном режиме.

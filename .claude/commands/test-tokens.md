@@ -1,35 +1,38 @@
 ---
-description: Проверить VK API токены (без запуска бота)
+description: Проверить VK API токены активного профиля
 ---
 
 # /test-tokens
 
-Проверяет корректность VK API токенов без полного запуска бота.
+Проверяет user_token и group_token активного профиля через VK API.
 
-## Использование
+## Через запущенный бот
 
 ```bash
-curl http://localhost:8000/api/tests/vk_tokens
+Invoke-RestMethod -Method Post http://localhost:8000/api/vk/validate
 ```
 
-Или через Python:
+## Без запуска бота (Python)
+
 ```bash
-cd /c/Users/Professional/Desktop/vk-post-reposting-bot/vk-post-reposting-bot
-python -c "from vk.api import test_vk_tokens; test_vk_tokens()"
+cd C:\Users\Professional\Desktop\vk-post-reposting-bot\vk-post-reposting-bot
+python -c "from vk.api import validate_vk_tokens; print(validate_vk_tokens())"
 ```
 
-## Результаты
-
-- ✅ Оба токена валидны и имеют доступ
-- ⚠️ Один токен не работает (какой конкретно)
-- ❌ Оба токена истекли / заблокированы
+`validate_vk_tokens()` определена в `vk/api.py`.
 
 ## Что проверяется
 
-- **user_token:** может ли получить информацию о пользователе
-- **group_token:** может ли получить информацию о группе и её стене
-- **Редакторство:** может ли пользователь редактировать целевую группу
+- **user_token:** доступен ли, действителен ли (нужен для скачивания постов и загрузки фото).
+- **group_token:** доступен ли, действителен ли, есть ли доступ к стене группы (нужен для публикации).
+- Токены и group_id берутся из `app_state.profile['vk']` активного профиля.
+
+## Результаты
+
+- `user_ok: true, group_ok: true` — всё в порядке.
+- `false` по одному из токенов — нужно обновить именно этот токен в Настройках UI.
+- Ошибки 5/28 — токен истёк/отозван, нужен новый токен из VK.
 
 ## Если что-то упало
 
-Смотри `logs/bot.log` для деталей ошибки.
+Смотри `logs/bot.log` или `/logs` — там видны коды ошибок VK API.

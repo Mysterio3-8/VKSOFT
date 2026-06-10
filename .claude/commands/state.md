@@ -4,45 +4,35 @@ description: Показать текущее состояние бота и ст
 
 # /state
 
-Выводит полное состояние бота: активный профиль, количество постов в очереди, статистику и флаги воркеров.
+Выводит состояние бота: активный профиль, очередь, статистику и флаги воркеров.
 
 ## Получить JSON состояние
 
 ```bash
-curl http://localhost:8000/api/dashboard/state
+Invoke-RestMethod http://localhost:8000/api/dashboard
 ```
 
-## Информация в состоянии
+Расширенная версия (+ growth/subscribers/tracker/autopilot):
 
-```json
-{
-  "active_profile": "p1",
-  "posts_in_queue": 42,
-  "stats": {
-    "published_today": 5,
-    "failed_today": 0,
-    "total_published": 2145,
-    "total_failed": 12
-  },
-  "workers": {
-    "is_downloading": false,
-    "is_publishing": false,
-    "is_autopilot": false,
-    "is_monitoring": false
-  },
-  "storage_size_mb": 2.3
-}
+```bash
+Invoke-RestMethod http://localhost:8000/api/dashboard/growth
 ```
 
-## Что означают флаги
+Состояние storage (размер, orphaned файлы):
 
-- **is_downloading:** скачивание постов из VK сейчас идёт
-- **is_publishing:** публикация постов в VK сейчас идёт
-- **is_autopilot:** цикл автопилота (скачивание + публикация) включен
-- **is_monitoring:** мониторинг новостей включен
+```bash
+Invoke-RestMethod http://localhost:8000/api/cleanup/status
+```
+
+## Что искать в ответе `/api/dashboard`
+
+- `active_profile` / `profile_name` — текущий канал
+- `queue` / `pending_posts` — сколько постов в очереди на публикацию
+- `stats` — `published`, `failed` (всего) и за сегодня
+- флаги воркеров в `app_state`: `is_downloading`, `is_publishing`, `is_autopilot`, `is_monitoring`
 
 ## Если что-то зависло
 
-- **Флаг = true, но ничего не происходит:** воркер упал. Проверь логи (`/logs`).
-- **posts_in_queue = 0, но вроде есть посты:** они ещё скачиваются.
-- **storage_size большой:** очисти orphaned photos (`/cleanup`).
+- **Флаг = true, но ничего не происходит:** воркер упал или ждёт паузы между постами. Проверь логи (`/logs`).
+- **Очередь не уменьшается:** проверь токены и последние ошибки в логах.
+- **storage большой / много orphaned:** `/cleanup`.
