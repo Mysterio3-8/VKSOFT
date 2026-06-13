@@ -149,7 +149,7 @@ class AppState:
 
 ---
 
-## Checkpoint (2026-06-13 18:38)
+## Checkpoint (2026-06-13 18:45)
 
 **Сделано (по отчёту «closed-loop optimizer»):**
 - Библиотека: 500 подписей в 5 семействах (Q/E/M/C/R по 100, id Q001..R100),

@@ -212,6 +212,19 @@ def _download_videos_source(community_id: str, count: int,
                 skipped += 1
                 continue
 
+            # pHash дедупликация по первому кадру (видео/клипы)
+            phash_cfg = profile.get('phash', {})
+            if phash_cfg.get('enabled', False):
+                from services.phash import hash_video_frame, is_duplicate, add_to_cache
+                frame_hash = hash_video_frame(dest)
+                if frame_hash:
+                    if is_duplicate(dest, int(phash_cfg.get('threshold', 10)), precomputed_hash=frame_hash):
+                        app_state.add_log(f'{label}: дубликат по кадру, пропускаю {dest.name}', 'info')
+                        dest.unlink(missing_ok=True)
+                        skipped += 1
+                        continue
+                    add_to_cache(dest, f'video_{key}', precomputed_hash=frame_hash)
+
             meta = {
                 'id': vid_id,
                 'owner_id': vid_owner,
