@@ -232,6 +232,7 @@ def media_loop_worker(media_type: str) -> None:
                 last_start=datetime.now().strftime('%d.%m %H:%M'),
                 next_run='',
             )
+            _set_progress(media_type, phase='idle', current=0, total=0)
             try:
                 _CYCLES[media_type]()
             except Exception as e:
@@ -255,6 +256,7 @@ def media_loop_worker(media_type: str) -> None:
     finally:
         app_state.media_loops[media_type] = False
         _set_state(media_type, phase='stopped', next_run='')
+        _set_progress(media_type, phase='idle', current=0, total=0)
         app_state.add_log(f'Автопилот ({label}): цикл остановлен', 'info')
 
 

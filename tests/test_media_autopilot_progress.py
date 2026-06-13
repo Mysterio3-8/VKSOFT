@@ -29,3 +29,22 @@ def test_progress_field_appears_in_loops_status(monkeypatch):
         'total': 5,
         'label': 'Публикация',
     }
+
+
+def test_media_loop_worker_resets_progress_to_idle_between_passes(monkeypatch):
+    monkeypatch.setitem(app_state.media_loop_state, 'posts', {'progress': {
+        'phase': 'download', 'current': 7, 'total': 10, 'label': 'старое',
+    }})
+    monkeypatch.setitem(app_state.config, 'active_profile', 'test')
+    monkeypatch.setitem(app_state.config, 'profiles', {'test': {
+        'autopilot': {'intervals': {'posts': 180}},
+    }})
+    monkeypatch.setitem(app_state.media_loops, 'posts', False)
+
+    import workers.media_autopilot as ma
+    monkeypatch.setitem(ma._CYCLES, 'posts', lambda: None)
+
+    ma.media_loop_worker('posts')
+
+    progress = app_state.media_loop_state['posts']['progress']
+    assert progress == {'phase': 'idle', 'current': 0, 'total': 0, 'label': ''}
