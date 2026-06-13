@@ -247,7 +247,7 @@ def download_videos_worker():
     profile = app_state.profile
     sources = [s for s in profile.get('sources', []) if s.get('enabled')]
     cfg = profile.get('videos_settings', {})
-    count  = int(cfg.get('videos_per_run', 10))
+    count  = int(cfg.get('videos_download_per_run', cfg.get('videos_per_run', 10)))
     max_mb = int(cfg.get('max_filesize_mb', 500))
     quality = cfg.get('quality', '720')
 
@@ -256,10 +256,16 @@ def download_videos_worker():
         app_state.is_downloading_videos = False
         return
     try:
+        from services.seasonality import order_sources_by_season
+        from services.source_quality import is_source_blocked
+        sources = order_sources_by_season(sources)
         for src in sources:
             if not app_state.is_downloading_videos:
                 break
             cid = str(src.get('community_id', ''))
+            if is_source_blocked(cid):
+                app_state.add_log(f'Видео: источник {src.get("name", cid)} в стоп-листе — пропускаю', 'info')
+                continue
             app_state.add_log(f'Видео: источник {src.get("name", cid)}', 'info')
             _download_videos_source(cid, count, max_mb=max_mb, quality=quality, is_clips_mode=False)
     except Exception as e:
@@ -308,8 +314,7 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
 
         app_state.add_log(f'{label}: публикация {len(queue)}', 'info')
         published = failed = 0
-        from workers.photos import _get_next_ts
-        next_ts = _get_next_ts(delay_min, delay_max)
+        media_type = 'clips' if is_clips_mode else 'videos'
 
         for meta_file in queue:
             if not getattr(app_state, flag):
@@ -323,10 +328,10 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                     meta_file.unlink(missing_ok=True)
                     continue
 
-                # Антиплагиат: кроп, вырез фрагмента, лого, метаданные через ffmpeg
+                # Антиплагиат: кроп, вырез, лого, скорость, фейды, blur-плашки
                 try:
-                    from services.video_transform import transform_from_profile
-                    if transform_from_profile(
+                    from services.media_pipeline import process_video
+                    if process_video(
                         video_path, profile,
                         title=meta.get('title', ''),
                         is_clip=is_clips_mode,
@@ -334,6 +339,17 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                         app_state.add_log(f'{label}: антиплагиат применён к {video_path.name}', 'info')
                 except Exception as e:
                     app_state.add_log(f'{label}: обработка видео {e}', 'warning')
+
+                # Hook-текст поверх клипа (slideshow получает оверлей при сборке)
+                overlay_family = meta.get('overlay_family', '')
+                if is_clips_mode and not overlay_family:
+                    try:
+                        from services.clip_assembler import apply_overlay_from_profile
+                        overlay_family = apply_overlay_from_profile(video_path, profile) or ''
+                        if overlay_family:
+                            app_state.add_log(f'{label}: hook-оверлей ({overlay_family})', 'info')
+                    except Exception as e:
+                        app_state.add_log(f'{label}: оверлей {e}', 'warning')
 
                 vid_owner, vid_id = _upload_video(
                     vk_user, gid_num, video_path,
@@ -349,18 +365,19 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                 att = f'video{vid_owner}_{vid_id}'
 
                 if create_wall:
-                    from services.content_library import compose_caption
+                    from services.content_library import compose_caption_with_meta
                     processing = profile.get('processing', {})
-                    text = compose_caption(
+                    # Для видео и клипов — клиповые веса семейств (CTA важнее)
+                    text, caption_meta = compose_caption_with_meta(
                         '',
                         add_tags=True,
                         profile_tags=processing.get('hashtags', []),
                         add_profile_tags=processing.get('add_hashtags', False),
+                        media_format='clip',
                     )
 
-                    now = int(time.time())
-                    if next_ts <= now:
-                        next_ts = now + random.randint(delay_min, delay_max)
+                    from services.slot_scheduler import reserve_slot
+                    next_ts = reserve_slot(media_type, delay_min, delay_max)
 
                     params = {
                         'owner_id': owner_id,
@@ -368,15 +385,28 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                         'attachments': att,
                         'publish_date': next_ts,
                     }
-                    vk_call_safe(vk_group.wall.post, **params)
+                    result = vk_call_safe(vk_group.wall.post, **params)
+                    vk_post_id = result.get('post_id') if isinstance(result, dict) else None
+                    if vk_post_id:
+                        try:
+                            from services.tracker import track as _track
+                            _track(
+                                vk_post_id, owner_id, str(meta.get('owner_id', '')),
+                                published_at=next_ts,
+                                caption_category=caption_meta.get('caption_category', ''),
+                                caption_text=caption_meta.get('caption_text', ''),
+                                caption_id=caption_meta.get('caption_id', ''),
+                                media_type=meta.get('media_kind')
+                                or ('clip' if is_clips_mode else 'video'),
+                                overlay_family=overlay_family,
+                            )
+                        except Exception:
+                            pass
                     from datetime import datetime
-                    from services.storage import write_last_scheduled
                     app_state.add_log(
                         f'{label}: → {datetime.fromtimestamp(next_ts).strftime("%d.%m %H:%M")}',
                         'info'
                     )
-                    write_last_scheduled(next_ts)
-                    next_ts += random.randint(delay_min, delay_max)
 
                 video_path.unlink(missing_ok=True)
                 meta_file.unlink(missing_ok=True)
