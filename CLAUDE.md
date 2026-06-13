@@ -1,5 +1,10 @@
 # VK Post Reposting Bot
 
+## Project rule
+
+- Do not add UI elements, product features, behavior changes, or "nice-to-have" improvements without explicit user permission. If an improvement seems useful, ask first and wait for approval.
+- Start new Codex sessions from `docs/AGENT_CONTEXT.md`; read broader project files only when the current task needs them.
+
 **Статус:** 🟢 прод
 **Язык:** Python 3.10+ / FastAPI, порт 8000
 **Запуск:** `start.bat` или `python main.py`
@@ -13,6 +18,7 @@
 
 | Файл | Для чего |
 |---|---|
+| `docs/AGENT_CONTEXT.md` | Короткий контекст для Codex: читать первым, чтобы не перечитывать весь проект |
 | `docs/PROJECT_DOCUMENTATION.md` | Полная техническая документация: все API роутеры, services, workers, тесты |
 | `docs/РУКОВОДСТВО_ПОЛЬЗОВАТЕЛЯ.md` | Нетехническое руководство для владельца канала |
 | `.claude/rules/bot-invariants.md` | Архитектурные инварианты для Python-кода (слои, AppState, логирование) |
@@ -31,10 +37,10 @@ vk-post-reposting-bot/
 │                       upload.py (загрузка фото/видео)
 ├── services/          # Бизнес-логика без HTTP: storage, autopilot,
 │                       growth_autopilot, learning, tracker, content_library,
-│                       smart_scheduler, ocr, phash, photo_transform,
-│                       video_transform, watermark, telegram, cleanup_storage
-├── workers/           # Фоновые asyncio-задачи: download, publish, monitor,
-│                       autopilot, photos, videos, clips, stories
+│                       smart_scheduler, ocr, phash, media_pipeline,
+│                       photo_transform, video_transform, watermark, telegram
+├── workers/           # Фоновые задачи (daemon-потоки): download, publish,
+│                       monitor, media_autopilot, photos, videos, clips
 ├── api/               # FastAPI роутеры (тонкий слой, /api/* )
 ├── frontend/          # Vanilla JS SPA (frontend/js/*.js модули)
 ├── storage/{profile_id}/   # Изолированное состояние каждого профиля
@@ -102,9 +108,17 @@ class AppState:
   почти сразу, остальные — в обычную очередь. OCR-фильтр пропускает фото с
   текстом. `_watchdog_loop` в `main.py` перезапускает воркер при падении.
 
-- **`autopilot_worker`** (`workers/autopilot.py`) — цикл:
-  скачать → опубликовать → подождать `cycle_interval_min` → повторить.
-  Отчёт после цикла уходит в Telegram (если настроен).
+- **`media_loop_worker`** (`workers/media_autopilot.py`) — 4 независимых
+  цикла автопилота: посты / фото / видео / клипы. Каждый: скачать →
+  антиплагиат (`services/media_pipeline.py`) → опубликовать → пауза →
+  повтор. Интервалы — `autopilot.intervals.{type}` (дефолт 180 мин).
+  Кнопки на дашборде, API: `/api/autopilot/loop/{type}/start|stop`.
+
+- **Антиплагиат** (`services/media_pipeline.py`) — единая точка для всех
+  медиа: фото (Pillow: кроп, цвет, зеркало, blur-плашки, рамка, вотермарка,
+  подмена EXIF) и видео/клипы (ffmpeg: кроп, вырез, лого, скорость, шум,
+  фейды, квадрат/вертикаль с blur-плашками). В hard-режиме параметры
+  рандомятся на каждый файл. Клипы всегда приводятся к 9:16.
 
 ---
 
@@ -135,24 +149,51 @@ class AppState:
 
 ---
 
-## Checkpoint (2026-06-10)
+## Checkpoint (2026-06-13 17:36)
 
-**Сделано:**
-- Реорганизация `.claude/`: удалены `.claude/README.md` и `.claude/AUTOUPDATE.md`
-  (дублировали друг друга и CLAUDE.md), CLAUDE.md сокращён с 491 до ~200 строк
-  по глобальному лимиту, добавлен `paths:` в `bot-invariants.md`
-- Переписаны `/build`, `/state`, `/cleanup`, `/test-tokens` под реальные
-  эндпоинты и функции (старые версии ссылались на несуществующие файлы/роуты)
-- Удалены `.env.example` (мёртвый, ничего не читает env), `CLAUDE.md.backup`,
-  `__pycache__`, `.pytest_cache`
-- Создано `docs/РУКОВОДСТВО_ПОЛЬЗОВАТЕЛЯ.md` — нетехнический гайд для владельца
+**Сделано (по отчёту «closed-loop optimizer»):**
+- Библиотека: 500 подписей в 5 семействах (Q/E/M/C/R по 100, id Q001..R100),
+  веса по форматам (`FORMAT_CATEGORY_WEIGHTS`: фото 30/25/15/15/15,
+  клип cta35/q25/r20/e15/m5), cooldown 14 дней на caption_id
+  (`caption_usage.json`)
+- Трекер: снимки метрик 1ч/6ч/24ч/72ч (`snapshots`, loop каждые 15 мин),
+  `media_type` у поста, velocity = views_1h/views_24h, нормированный score
+  к медиане формата (`compute_post_score`, пороги: ≥1.5 promote, <0.8 kill)
+- `services/source_quality.py`: white/stop-листы источников по median score
+  (white ≥1.2, stop <0.7 при 10+ постах, кулдаун 21 день); стоп-лист
+  применяется в циклах скачивания постов/фото/видео/клипов
+- Learning: веса семейств обучаются отдельно на фото и клипы
+  (ER = likes + 4×comments + 8×reposts, по отчёту)
+- API: `/growth/caption_stats` (по форматам), `/growth/post_scores`,
+  `/growth/source_quality`, `/growth/source_quality_recalc`
 
-**Активно:**
-- Нет незавершённого
+**Clip assembler v1 (`services/clip_assembler.py`) — сделан и проверен живым ffmpeg:**
+- Hook-оверлей на клипы: 4 семейства (curiosity/escape/scale/rating),
+  drawtext с автопереносом, CTA последние 1.5с у ~25% клипов. Автоматически
+  в publish-цикле клипов (выкл: `clips_settings.overlay_enabled=false`).
+  Семейство выбирает UCB-бандит по статистике трекера (после 12 клипов)
+- Slideshow-клипы из фото: 9:16 1080×1920, zoompan, фейды. Звук: треки из
+  `storage/music/`, а если их нет — аудиодорожка случайного скачанного
+  клипа/видео (донор). Собираются АВТОМАТИЧЕСКИ в цикле автопилота клипов
+  (`slideshow_auto`, по 2 за проход при ≥6 фото в очереди). Формат `slideshow_clip`
+- Шрифт: C:/Windows/Fonts (arialbd и др.), `clips_settings.overlay_font`
+
+**Полная автономия (всё из отчёта работает само):**
+- `services/bandit.py` — батчевый UCB: выбор семейства подписей
+  (после 20 применений на формат, epsilon 0.2) и hook-оверлеев
+- `services/seasonality.py` — сезонные веса source_bucket (таблица отчёта);
+  источники сортируются по сезону во всех циклах скачивания. Разметка:
+  `"bucket": "sea|mountain|forest|snow|waterfall"` у источника в config.json
+  (без метки — вес 1.0)
+- repeat_winners включён по умолчанию (сам ждёт, пока появятся победители)
+- overlay_family трекается; API: `/growth/boost_candidates` (score ≥ 2.0,
+  кандидаты на платный буст), `/growth/weekly_report` (winners/losers,
+  семейства, оверлеи, источники)
 
 **Следующий шаг:**
-- При следующих изменениях кода — держать этот файл под 200 строк, новые
-  детали выносить в `docs/PROJECT_DOCUMENTATION.md` или `.claude/rules/`
+- Через неделю: `/api/growth/weekly_report` — проверить что снимки,
+  score и бандиты копят данные
+- Опционально: разметить источники по bucket, сократить очередь VK до 10-14 дней
 
 **Блокеры:**
-- Нет
+- tests/test_playwright_ui.py: 2 теста падали и до изменений (среда)
