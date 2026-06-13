@@ -84,11 +84,9 @@ def _download_source(community_id: str, count: int):
 
     allow_video = profile.get('processing', {}).get('allow_video', False)
 
-    # в”Ђв”Ђ РџСѓРЅРєС‚ 1: С„РёР»СЊС‚СЂ РїРѕ РІРѕРІР»РµС‡С‘РЅРЅРѕСЃС‚Рё в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-    eng_cfg = profile.get('engagement', {})
-    eng_enabled   = eng_cfg.get('enabled', False)
-    eng_min_ratio = float(eng_cfg.get('min_ratio', 0.5))  # % Р»Р°Р№РєРѕРІ РѕС‚ РїСЂРѕСЃРјРѕС‚СЂРѕРІ
-    eng_min_likes = int(eng_cfg.get('min_likes', 0))
+    # Фильтр по вовлечённости отключён намеренно (в коде, не в конфиге):
+    # пользователь решил брать все исходные посты — разные посты
+    # вирусятся на разных каналах.
 
     # в”Ђв”Ђ РџСѓРЅРєС‚ 6: phash РґРµРґСѓРїР»РёРєР°С†РёСЏ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     phash_cfg = profile.get('phash', {})
@@ -116,7 +114,6 @@ def _download_source(community_id: str, count: int):
         'video_disabled': 0,
         'no_media': 0,
         'filters': 0,
-        'engagement': 0,
         'duplicate': 0,
         'photo_download': 0,
         'phash': 0,
@@ -171,20 +168,6 @@ def _download_source(community_id: str, count: int):
                 skipped += 1
                 skip_reasons['filters'] += 1
                 continue
-
-            # в”Ђв”Ђ РџСѓРЅРєС‚ 1: С„РёР»СЊС‚СЂ РїРѕ РІРѕРІР»РµС‡С‘РЅРЅРѕСЃС‚Рё в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-            if eng_enabled:
-                likes = post.get('likes', {}).get('count', 0)
-                views = post.get('views', {}).get('count', 1)
-                ratio = likes / max(views, 1) * 100
-                if eng_min_likes > 0 and likes < eng_min_likes:
-                    skipped += 1
-                    skip_reasons['engagement'] += 1
-                    continue
-                if eng_min_ratio > 0 and ratio < eng_min_ratio:
-                    skipped += 1
-                    skip_reasons['engagement'] += 1
-                    continue
 
             fname = app_state.posts_dir / f'{community_id}_{post_id}.json'
             if check_dup and (fname.exists() or _is_used_post(post, str(community_id))):
