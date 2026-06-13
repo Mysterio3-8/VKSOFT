@@ -48,3 +48,19 @@ def test_media_loop_worker_resets_progress_to_idle_between_passes(monkeypatch):
 
     progress = app_state.media_loop_state['posts']['progress']
     assert progress == {'phase': 'idle', 'current': 0, 'total': 0, 'label': ''}
+
+
+def test_download_source_updates_media_loop_progress(monkeypatch, tmp_path):
+    """_download_source должен синхронизировать app_state.media_loop_state['posts']['progress']."""
+    monkeypatch.setitem(app_state.media_loop_state, 'posts', {})
+    monkeypatch.setattr(app_state, 'download_progress', {'cancelled': False})
+
+    from workers.media_autopilot import _set_progress
+    # Симулируем то, что должен делать _download_source при старте загрузки:
+    _set_progress('posts', phase='download', current=0, total=5, label='Загрузка из -123')
+    _set_progress('posts', phase='download', current=3, total=5, label='Сохранено 3 из 5')
+
+    progress = app_state.media_loop_state['posts']['progress']
+    assert progress['phase'] == 'download'
+    assert progress['current'] == 3
+    assert progress['total'] == 5

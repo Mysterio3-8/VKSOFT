@@ -108,6 +108,9 @@ def _download_source(community_id: str, count: int):
         'cancelled': app_state.download_progress.get('cancelled', False),
     }
 
+    from workers.media_autopilot import _set_progress
+    _set_progress('posts', phase='download', current=0, total=count, label=f'Загрузка из {owner_id}')
+
     started_at = time.time()
     downloaded = skipped = scanned = 0
     skip_reasons = {
@@ -235,6 +238,7 @@ def _download_source(community_id: str, count: int):
             downloaded += 1
             app_state.download_progress['current'] = downloaded
             app_state.download_progress['message'] = f'РЎРѕС…СЂР°РЅРµРЅРѕ {downloaded} РёР· {count}'
+            _set_progress('posts', phase='download', current=downloaded, total=count, label=f'Сохранено {downloaded} из {count}')
             if downloaded % 10 == 0 or downloaded == 1:
                 app_state.add_log(f'[{owner_id}] {downloaded}/{count} СЃРѕС…СЂР°РЅРµРЅРѕ', 'info')
 
