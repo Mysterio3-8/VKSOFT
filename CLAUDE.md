@@ -151,49 +151,32 @@ class AppState:
 
 ## Checkpoint (2026-06-13 19:05)
 
-**Сделано (по отчёту «closed-loop optimizer»):**
-- Библиотека: 500 подписей в 5 семействах (Q/E/M/C/R по 100, id Q001..R100),
-  веса по форматам (`FORMAT_CATEGORY_WEIGHTS`: фото 30/25/15/15/15,
-  клип cta35/q25/r20/e15/m5), cooldown 14 дней на caption_id
-  (`caption_usage.json`)
-- Трекер: снимки метрик 1ч/6ч/24ч/72ч (`snapshots`, loop каждые 15 мин),
-  `media_type` у поста, velocity = views_1h/views_24h, нормированный score
-  к медиане формата (`compute_post_score`, пороги: ≥1.5 promote, <0.8 kill)
-- `services/source_quality.py`: white/stop-листы источников по median score
-  (white ≥1.2, stop <0.7 при 10+ постах, кулдаун 21 день); стоп-лист
-  применяется в циклах скачивания постов/фото/видео/клипов
-- Learning: веса семейств обучаются отдельно на фото и клипы
-  (ER = likes + 4×comments + 8×reposts, по отчёту)
-- API: `/growth/caption_stats` (по форматам), `/growth/post_scores`,
-  `/growth/source_quality`, `/growth/source_quality_recalc`
+**Slot scheduler + media quality (план `docs/superpowers/plans/2026-06-13-slot-scheduler-and-media-quality.md`, 16/16 задач):**
+- `services/slot_scheduler.py`: единый резерв слотов публикации для постов/
+  фото/видео/клипов — `reserve_slot()`/`record_slot()`, `min_gap` между
+  любыми типами, дневные лимиты (видео=1, клипы=2/день, хардкод). Хранится в
+  `app_state.scheduled_slots_file`. Подключён во все 3 publish-воркера —
+  больше нет коллизий слотов и спама постов с интервалом 10-30 мин
+- pHash-дедуп (`services/phash.py`) включён для фото (был выключен по
+  умолчанию) и расширен на видео/клипы (хэш кадров)
+- Engagement-фильтр отключён хардкодом в коде (не в config.json) — забираются
+  все посты источника, а не только "лучшие"
+- `services/publish_log.py`: структурированный JSONL-лог каждой попытки
+  публикации (`success|failed|duplicate|skipped`) в
+  `storage/{profile}/publish_log.jsonl`, авторотация в `.gz` раз в сутки —
+  вызывается из `media_loop_worker` на каждом проходе
+- Видео-антиплагиат смягчён: crop 1-3% (было 4-8%), fade-вероятность 20%
+  (было 50%), рамка 10% (было 30%), aspect_mode веса смещены к `original`
+  (0.65/0.25/0.10) — меньше потери качества
+- Фото-кроп по умолчанию 1-2.5% (было 2-5%) — `apply_random_crop`
 
-**Clip assembler v1 (`services/clip_assembler.py`) — сделан и проверен живым ffmpeg:**
-- Hook-оверлей на клипы: 4 семейства (curiosity/escape/scale/rating),
-  drawtext с автопереносом, CTA последние 1.5с у ~25% клипов. Автоматически
-  в publish-цикле клипов (выкл: `clips_settings.overlay_enabled=false`).
-  Семейство выбирает UCB-бандит по статистике трекера (после 12 клипов)
-- Slideshow-клипы из фото: 9:16 1080×1920, zoompan, фейды. Звук: треки из
-  `storage/music/`, а если их нет — аудиодорожка случайного скачанного
-  клипа/видео (донор). Собираются АВТОМАТИЧЕСКИ в цикле автопилота клипов
-  (`slideshow_auto`, по 2 за проход при ≥6 фото в очереди). Формат `slideshow_clip`
-- Шрифт: C:/Windows/Fonts (arialbd и др.), `clips_settings.overlay_font`
-
-**Полная автономия (всё из отчёта работает само):**
-- `services/bandit.py` — батчевый UCB: выбор семейства подписей
-  (после 20 применений на формат, epsilon 0.2) и hook-оверлеев
-- `services/seasonality.py` — сезонные веса source_bucket (таблица отчёта);
-  источники сортируются по сезону во всех циклах скачивания. Разметка:
-  `"bucket": "sea|mountain|forest|snow|waterfall"` у источника в config.json
-  (без метки — вес 1.0)
-- repeat_winners включён по умолчанию (сам ждёт, пока появятся победители)
-- overlay_family трекается; API: `/growth/boost_candidates` (score ≥ 2.0,
-  кандидаты на платный буст), `/growth/weekly_report` (winners/losers,
-  семейства, оверлеи, источники)
+**Полный набор тестов: 126 passed** (`pytest tests/ -q --ignore=tests/test_playwright_ui.py`)
 
 **Следующий шаг:**
-- Через неделю: `/api/growth/weekly_report` — проверить что снимки,
-  score и бандиты копят данные
-- Опционально: разметить источники по bucket, сократить очередь VK до 10-14 дней
+- Понаблюдать неделю за `publish_log.jsonl` — убедиться что слоты не
+  коллизят и дневные лимиты видео/клипов соблюдаются
+- Создать скилл `.claude/commands/` для авто-коммитов и авто-деплоя
+  (запрошено пользователем, не сделано в этой сессии)
 
 **Блокеры:**
 - tests/test_playwright_ui.py: 2 теста падали и до изменений (среда)
