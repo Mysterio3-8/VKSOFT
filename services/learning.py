@@ -26,6 +26,10 @@ LEARN_INTERVAL_SEC = 3600   # обновляем каждый час
 MIN_POSTS_FOR_SIGNAL = 10   # минимум постов для доверия своему сигналу
 COMPETITOR_WEIGHT = 0.35    # вес конкурентов в итоговом сигнале (остальное — свои данные)
 
+MIN_CAPTION_POSTS = 5       # минимум проверенных постов на категорию подписей
+CAPTION_WEIGHT_FLOOR = 10   # ни одна категория не падает ниже — продолжает тестироваться
+CAPTION_FORMATS = ('photo', 'clip')  # веса обучаются отдельно на формат
+
 
 def _state_file(profile_id: str) -> Path:
     return STORAGE_DIR / profile_id / 'learning_state.json'
@@ -91,6 +95,66 @@ def _normalize_heatmap(heatmap: dict[int, float]) -> dict[int, float]:
     if max_val == 0:
         return heatmap
     return {h: v / max_val for h, v in heatmap.items()}
+
+
+def compute_caption_weights(caption_stats: dict) -> dict | None:
+    """Рассчитать веса категорий подписей по их вовлечённости.
+
+    Возвращает None, если данных недостаточно (меньше MIN_CAPTION_POSTS
+    хотя бы в одной категории) или сигнала нет (все ER нулевые) — тогда
+    текущие веса не трогаем.
+    """
+    from services.content_library import CATEGORY_WEIGHTS
+
+    for category in CATEGORY_WEIGHTS:
+        bucket = caption_stats.get(category, {})
+        if int(bucket.get('posts', 0)) < MIN_CAPTION_POSTS:
+            return None
+
+    ers = {c: float(caption_stats[c].get('avg_er', 0.0)) for c in CATEGORY_WEIGHTS}
+    total_er = sum(ers.values())
+    if total_er <= 0:
+        return None
+
+    free = 100 - CAPTION_WEIGHT_FLOOR * len(CATEGORY_WEIGHTS)
+    weights = {
+        c: CAPTION_WEIGHT_FLOOR + int(round(free * ers[c] / total_er))
+        for c in CATEGORY_WEIGHTS
+    }
+    # Округление может увести сумму от 100 — корректируем лидера
+    drift = 100 - sum(weights.values())
+    if drift:
+        leader = max(weights, key=lambda c: ers[c])
+        weights[leader] += drift
+    return weights
+
+
+def _learn_caption_weights() -> dict:
+    """Обновить веса семейств подписей по статистике трекера — на каждый формат."""
+    from services.content_library import load_library, update_category_weights
+    from services.tracker import get_caption_stats
+
+    result = {'caption_stats': {}, 'caption_weights_applied': {}}
+    current_all = load_library().get('category_weights', {})
+
+    for media_format in CAPTION_FORMATS:
+        caption_stats = get_caption_stats(media_type=media_format)
+        result['caption_stats'][media_format] = caption_stats
+
+        new_weights = compute_caption_weights(caption_stats)
+        if not new_weights:
+            continue
+        if new_weights == current_all.get(media_format, {}):
+            continue
+
+        update_category_weights(new_weights, media_format)
+        result['caption_weights_applied'][media_format] = new_weights
+        logger.info(f'learning: веса подписей [{media_format}] → {new_weights}')
+        app_state.add_log(f'[Обучение] Веса подписей ({media_format}) → {new_weights}', 'info')
+
+    if not result['caption_weights_applied']:
+        result['caption_weights_applied'] = None
+    return result
 
 
 def run_learning_cycle() -> dict:
@@ -160,6 +224,23 @@ def run_learning_cycle() -> dict:
             logger.info(f'learning: обновил peak_hours → {sorted(recommended_hours)}')
             app_state.add_log(f'[Обучение] Обновил часы публикации → {sorted(recommended_hours)}', 'info')
 
+    # ── 7.5. Обучение весов категорий подписей ──────────────────────
+    try:
+        caption_result = _learn_caption_weights()
+        if caption_result.get('caption_weights_applied'):
+            applied_changes.append(f'caption_weights → {caption_result["caption_weights_applied"]}')
+    except Exception as e:
+        logger.warning(f'learning: caption weights error: {e}')
+        caption_result = {'caption_stats': {}, 'caption_weights_applied': None}
+
+    # ── 7.6. Белые/стоп-листы источников по нормированному score ────
+    try:
+        from services.source_quality import update_source_states
+        source_states = update_source_states()
+    except Exception as e:
+        logger.warning(f'learning: source states error: {e}')
+        source_states = {}
+
     # ── 8. Записываем состояние ──────────────────────────────────────
     state = {
         'updated_at': int(time.time()),
@@ -176,6 +257,9 @@ def run_learning_cycle() -> dict:
         'prefer_multi_photo': best_content_type == 'multi_photo',
         'own_avg_views': own_summary.get('avg_views', 0),
         'own_avg_likes': own_summary.get('avg_likes', 0),
+        'caption_stats': caption_result.get('caption_stats', {}),
+        'caption_weights_applied': caption_result.get('caption_weights_applied'),
+        'source_states': source_states,
     }
 
     _save_state(profile_id, state)

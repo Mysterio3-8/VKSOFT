@@ -258,7 +258,7 @@ def fill_slots_with_queue(
                     continue
 
                 post_data = json.loads(post_file.read_text(encoding='utf-8'))
-                text = _compose_publish_text(post_data, profile, profile_id)
+                text, caption_meta = _compose_publish_text(post_data, profile, profile_id)
                 local_photos, all_local_photos = _prepare_local_photos_for_publish(
                     post_data.get('_local_photos', []),
                     profile,
@@ -292,6 +292,20 @@ def fill_slots_with_queue(
                 result = vk_call_safe(vk_group.wall.post, **params)
                 post_id = result.get('post_id', 0) if isinstance(result, dict) else 0
                 add_log(f"[Слоты] Вставлен пост в {slot['display']} (id={post_id})", 'info')
+
+                if post_id:
+                    try:
+                        from services.tracker import track as _track
+                        _track(
+                            post_id, f'-{gid}', str(post_data.get('owner_id', '')),
+                            published_at=slot['ts'],
+                            caption_category=caption_meta.get('caption_category', ''),
+                            caption_text=caption_meta.get('caption_text', ''),
+                            caption_id=caption_meta.get('caption_id', ''),
+                            media_type='photo',
+                        )
+                    except Exception:
+                        pass
 
                 try:
                     from services.cleanup_storage import cleanup_post_artifacts

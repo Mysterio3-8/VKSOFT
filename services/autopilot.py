@@ -49,16 +49,20 @@ def default_profile_patch() -> Dict:
     """Growth defaults that are safe until the user explicitly applies them."""
     return {
         'download_settings': {
-            'posts_to_download': 35,
-            'delay_min': 2,
-            'delay_max': 5,
-            'check_duplicates': False,
+            'posts_to_download': 100,
+            'delay_min': 0,
+            'delay_max': 0,
+            'check_duplicates': True,
+            'batch_size': 100,
+            'max_scan_posts': 400,
+            'max_photos_per_post': 2,
         },
         'publishing_settings': {
-            'posts_to_publish': 35,
+            'posts_to_publish': 100,
             'publish_delay_min': 10800,
             'publish_delay_max': 18000,
             'postponed_enabled': True,
+            'skip_vk_sync': True,
             'publish_hours_enabled': True,
             'publish_hours_start': 8,
             'publish_hours_end': 22,

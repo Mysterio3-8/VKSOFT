@@ -9,12 +9,14 @@
   "download_settings": {
     "posts_to_download": 100,
     "batch_size": 100,
-    "delay_between_requests": 1,
-    "check_duplicates": false
+    "delay_min": 0,
+    "delay_max": 0,
+    "check_duplicates": true
   },
   "publishing_settings": {
-    "posts_to_publish": 50,
+    "posts_to_publish": 100,
     "publish_delay": 3600,
+    "skip_vk_sync": true,
     "postponed_enabled": true
   },
   "processing": {

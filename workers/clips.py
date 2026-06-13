@@ -12,7 +12,7 @@ def download_clips_worker():
     profile = app_state.profile
     sources = [s for s in profile.get('sources', []) if s.get('enabled')]
     cfg = profile.get('clips_settings', {})
-    count        = int(cfg.get('clips_per_run', 10))
+    count        = int(cfg.get('clips_download_per_run', cfg.get('clips_per_run', 10)))
     max_duration = int(cfg.get('max_duration_sec', 180))
     quality      = cfg.get('quality', '720')
 
@@ -21,10 +21,16 @@ def download_clips_worker():
         app_state.is_downloading_clips = False
         return
     try:
+        from services.seasonality import order_sources_by_season
+        from services.source_quality import is_source_blocked
+        sources = order_sources_by_season(sources)
         for src in sources:
             if not app_state.is_downloading_clips:
                 break
             cid = str(src.get('community_id', ''))
+            if is_source_blocked(cid):
+                app_state.add_log(f'Клипы: источник {src.get("name", cid)} в стоп-листе — пропускаю', 'info')
+                continue
             app_state.add_log(f'Клипы: источник {src.get("name", cid)}', 'info')
             _download_videos_source(
                 cid, count,

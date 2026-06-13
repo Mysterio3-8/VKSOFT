@@ -123,6 +123,7 @@ def test_growth_cycle_patch_uses_fast_download_and_publish_defaults():
     })
 
     assert patch["download_settings"]["posts_to_download"] == 20
+    assert patch["download_settings"]["check_duplicates"] is True
     assert patch["download_settings"]["batch_size"] == 100
     assert patch["download_settings"]["delay_min"] == 0
     assert patch["download_settings"]["delay_max"] == 0

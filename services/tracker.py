@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Трекинг опубликованных постов + алерты — пункты 7, 10."""
+"""Трекинг опубликованных постов: снимки метрик, нормированный score, алерты."""
 
 import json
+import statistics
 import time
 import threading
 from datetime import datetime
 from pathlib import Path
 from config import app_state, STORAGE_DIR, logger
+
+# Снимки метрик по возрасту поста — velocity и ранние сигналы (P0 из отчёта)
+SNAPSHOT_HOURS = [1, 6, 24, 72]
+
+NORM_CAP = 3.0  # норма к медиане формата обрезается сверху — один выброс не ломает шкалу
 
 
 def _file() -> Path:
@@ -34,19 +40,40 @@ def _save(data: list):
         logger.warning(f'tracker _save: {e}')
 
 
-def track(vk_post_id: int, owner_id: str, source_cid: str = '', published_at: int | None = None):
+def track(
+    vk_post_id: int,
+    owner_id: str,
+    source_cid: str = '',
+    published_at: int | None = None,
+    caption_category: str = '',
+    caption_text: str = '',
+    caption_id: str = '',
+    media_type: str = 'photo',
+    overlay_family: str = '',
+):
     """Зарегистрировать пост сразу после публикации."""
     data = _load()
-    data.append({
+    entry = {
         'post_id': vk_post_id,
         'owner_id': owner_id,
         'source_cid': source_cid,
         'published_at': int(published_at or time.time()),
+        'media_type': media_type or 'photo',
         'checked': False,
         'likes': 0,
         'views': 0,
         'reposts': 0,
-    })
+        'comments': 0,
+        'snapshots': {},
+    }
+    if caption_category:
+        entry['caption_category'] = caption_category
+        entry['caption_text'] = caption_text
+        if caption_id:
+            entry['caption_id'] = caption_id
+    if overlay_family:
+        entry['overlay_family'] = overlay_family
+    data.append(entry)
     _save(data)
 
 
@@ -75,7 +102,8 @@ def build_hour_heatmap(data: list) -> list:
         views = int(post.get('views', 0) or 0)
         likes = int(post.get('likes', 0) or 0)
         reposts = int(post.get('reposts', 0) or 0)
-        score = views + likes * 10 + reposts * 25
+        comments = int(post.get('comments', 0) or 0)
+        score = views + likes * 10 + comments * 50 + reposts * 25
         bucket = buckets[hour]
         bucket['posts'] += 1
         bucket['views'] += views
@@ -136,8 +164,183 @@ def get_summary() -> dict:
     }
 
 
+def caption_engagement_score(post: dict) -> float:
+    """Вовлечённость поста: лайки×1, комменты×4, репосты×8 (формула из отчёта)."""
+    likes = int(post.get('likes', 0) or 0)
+    comments = int(post.get('comments', 0) or 0)
+    reposts = int(post.get('reposts', 0) or 0)
+    return likes + comments * 4 + reposts * 8
+
+
+def post_velocity(post: dict) -> float | None:
+    """views_1h / views_24h по снимкам — скорость раннего разгона."""
+    snaps = post.get('snapshots') or {}
+    h1 = snaps.get('1')
+    h24 = snaps.get('24')
+    if not h1 or not h24:
+        return None
+    return int(h1.get('views', 0) or 0) / max(int(h24.get('views', 0) or 0), 1)
+
+
+def _eligible(post: dict) -> bool:
+    return bool(
+        post.get('checked') and not post.get('missing')
+        and int(post.get('views', 0) or 0) > 0
+    )
+
+
+def build_format_baselines(data: list) -> dict:
+    """Медианы ER/views/velocity по формату — база для нормировки score.
+
+    Без нормировки внутри формата клипы всегда съедают фото за счёт
+    большего числа просмотров.
+    """
+    grouped: dict[str, dict[str, list]] = {}
+    for post in data:
+        if not _eligible(post):
+            continue
+        fmt = post.get('media_type', 'photo')
+        bucket = grouped.setdefault(fmt, {'er': [], 'views': [], 'velocity': []})
+        views = int(post.get('views', 0) or 0)
+        bucket['er'].append(caption_engagement_score(post) / views)
+        bucket['views'].append(views)
+        velocity = post_velocity(post)
+        if velocity is not None:
+            bucket['velocity'].append(velocity)
+
+    baselines = {}
+    for fmt, values in grouped.items():
+        baselines[fmt] = {
+            'er': statistics.median(values['er']) if values['er'] else 0.0,
+            'views': statistics.median(values['views']) if values['views'] else 0.0,
+            'velocity': statistics.median(values['velocity']) if values['velocity'] else 0.0,
+            'posts': len(values['views']),
+        }
+    return baselines
+
+
+def _norm(value: float, baseline: float) -> float:
+    if not baseline or baseline <= 0:
+        return 1.0  # нет базы — нейтрально, не наказываем и не награждаем
+    return min(value / baseline, NORM_CAP)
+
+
+def compute_post_score(post: dict, baselines: dict) -> float:
+    """Нормированный score поста относительно медианы его формата.
+
+    1.0 = типичный пост формата; ≥1.5 — promote; <0.8 — kill (пороги отчёта).
+    """
+    views = int(post.get('views', 0) or 0)
+    if views <= 0:
+        return 0.0
+    fmt = post.get('media_type', 'photo')
+    base = baselines.get(fmt, {})
+    er_norm = _norm(caption_engagement_score(post) / views, base.get('er', 0))
+    views_norm = _norm(views, base.get('views', 0))
+    velocity = post_velocity(post)
+    if velocity is not None and base.get('velocity'):
+        score = 0.5 * er_norm + 0.3 * views_norm + 0.2 * _norm(velocity, base['velocity'])
+    else:
+        score = 0.6 * er_norm + 0.4 * views_norm
+    return round(score, 4)
+
+
+def get_scored_posts() -> list:
+    """Все проверенные посты с нормированным score (для источников/победителей)."""
+    data = _load()
+    baselines = build_format_baselines(data)
+    return [
+        {**post, 'norm_score': compute_post_score(post, baselines)}
+        for post in data if _eligible(post)
+    ]
+
+
+def build_caption_stats(data: list, media_type: str = '') -> dict:
+    """Агрегировать engagement по категориям подписей (опционально по формату).
+
+    ER = score/views, чтобы убрать зависимость от времени публикации
+    (часы уже оптимизирует learning через heatmap).
+    """
+    stats: dict[str, dict] = {}
+    for post in data:
+        category = post.get('caption_category', '')
+        if not category:
+            continue
+        if media_type and post.get('media_type', 'photo') != media_type:
+            continue
+        if not _eligible(post):
+            continue
+        views = int(post.get('views', 0) or 0)
+        bucket = stats.setdefault(category, {
+            'posts': 0, 'views': 0, 'likes': 0, 'comments': 0, 'reposts': 0, 'er_sum': 0.0,
+        })
+        bucket['posts'] += 1
+        bucket['views'] += views
+        bucket['likes'] += int(post.get('likes', 0) or 0)
+        bucket['comments'] += int(post.get('comments', 0) or 0)
+        bucket['reposts'] += int(post.get('reposts', 0) or 0)
+        bucket['er_sum'] += caption_engagement_score(post) / views
+
+    for bucket in stats.values():
+        bucket['avg_er'] = round(bucket['er_sum'] / bucket['posts'], 5)
+        del bucket['er_sum']
+    return stats
+
+
+def get_caption_stats(media_type: str = '') -> dict:
+    return build_caption_stats(_load(), media_type)
+
+
+def build_overlay_stats(data: list) -> dict:
+    """Агрегаты по семействам hook-оверлеев (только клипы)."""
+    stats: dict[str, dict] = {}
+    for post in data:
+        family = post.get('overlay_family', '')
+        if not family or not _eligible(post):
+            continue
+        views = int(post.get('views', 0) or 0)
+        bucket = stats.setdefault(family, {'posts': 0, 'er_sum': 0.0})
+        bucket['posts'] += 1
+        bucket['er_sum'] += caption_engagement_score(post) / views
+
+    for bucket in stats.values():
+        bucket['avg_er'] = round(bucket['er_sum'] / bucket['posts'], 5)
+        del bucket['er_sum']
+    return stats
+
+
+def get_overlay_stats() -> dict:
+    return build_overlay_stats(_load())
+
+
+def mark_republished(post_id: int, republished_at: int | None = None) -> None:
+    """Пометить пост-победитель как переизданный (для cooldown повторов)."""
+    data = _load()
+    for post in data:
+        if post.get('post_id') == post_id:
+            post['republished_at'] = int(republished_at or time.time())
+            _save(data)
+            return
+
+
+def _due_snapshot_hour(post: dict, now: int) -> int | None:
+    """Самый поздний снимок, который пора снять. None — снимать нечего."""
+    if post.get('missing'):
+        return None
+    published_at = int(post.get('published_at', 0) or 0)
+    if published_at <= 0 or published_at > now:
+        return None  # отложенный пост ещё не вышел
+    age_hours = (now - published_at) / 3600
+    snaps = post.get('snapshots') or {}
+    due = None
+    for h in SNAPSHOT_HOURS:
+        if age_hours >= h and str(h) not in snaps:
+            due = h
+    return due
+
+
 def run_check():
-    """Проверить статистику постов опубликованных 24ч назад."""
+    """Снять очередные снимки метрик (1ч/6ч/24ч/72ч) для постов, где пора."""
     from vk.api import get_vk_api, vk_call_safe
 
     profile = app_state.profile
@@ -150,7 +353,6 @@ def run_check():
     if not user_token:
         return
 
-    check_after = 86400  # 24 часа
     now = int(time.time())
 
     try:
@@ -158,27 +360,33 @@ def run_check():
         vk = get_vk_api(user_token, vk_cfg.get('api_version', '5.131'))
         updated = False
 
-        unchecked = [
-            p for p in data
-            if not p.get('checked') and now - p.get('published_at', now) >= check_after
-        ]
-        if not unchecked:
+        pending = [(p, _due_snapshot_hour(p, now)) for p in data]
+        pending = [(p, due) for p, due in pending if due is not None]
+        if not pending:
             return
 
-        for i in range(0, len(unchecked), 25):
-            batch = unchecked[i:i + 25]
+        for i in range(0, len(pending), 25):
+            batch = pending[i:i + 25]
             try:
-                ids = ','.join(f'{p["owner_id"]}_{p["post_id"]}' for p in batch)
+                ids = ','.join(f'{p["owner_id"]}_{p["post_id"]}' for p, _ in batch)
                 resp = vk_call_safe(vk.wall.getById, posts=ids, extended=1)
                 items = (resp.get('items', []) if isinstance(resp, dict) else resp) or []
                 stats_map = {item['id']: item for item in items}
-                for p in batch:
+                for p, due in batch:
                     item = stats_map.get(p['post_id'])
                     if item:
-                        p['likes']   = item.get('likes',   {}).get('count', 0)
-                        p['views']   = item.get('views',   {}).get('count', 0)
-                        p['reposts'] = item.get('reposts', {}).get('count', 0)
-                        p['checked'] = True
+                        metrics = {
+                            'views':    item.get('views',    {}).get('count', 0),
+                            'likes':    item.get('likes',    {}).get('count', 0),
+                            'reposts':  item.get('reposts',  {}).get('count', 0),
+                            'comments': item.get('comments', {}).get('count', 0),
+                        }
+                        snaps = p.setdefault('snapshots', {})
+                        snaps[str(due)] = {**metrics, 'captured_at': now}
+                        # Верхний уровень — всегда самые свежие метрики
+                        p.update(metrics)
+                        if due >= 24:
+                            p['checked'] = True
                         updated = True
                     else:
                         # Пост не найден (удалён/не вышел). Не помечаем checked —
@@ -289,6 +497,7 @@ def bootstrap_from_wall():
                         p['likes'] = s.get('likes', {}).get('count', 0)
                         p['views'] = s.get('views', {}).get('count', 0)
                         p['reposts'] = s.get('reposts', {}).get('count', 0)
+                        p['comments'] = s.get('comments', {}).get('count', 0)
                         p['checked'] = True
                     else:
                         p['checked'] = True
@@ -309,9 +518,9 @@ def bootstrap_from_wall():
 
 
 def tracker_loop():
-    """Фоновый поток — проверяет посты каждый час."""
+    """Фоновый поток — снимает метрики каждые 15 минут (нужен точный снимок 1ч)."""
     while True:
-        time.sleep(3600)
+        time.sleep(900)
         try:
             run_check()
         except Exception as e:

@@ -51,7 +51,7 @@ def test_fill_slots_applies_antiplagiarism_before_posting(monkeypatch, tmp_path)
         uploaded.append(path.name)
         return f"photo-{group_id_num}_{path.stem}"
 
-    monkeypatch.setattr("services.photo_transform.apply_transforms_from_profile", fake_transform)
+    monkeypatch.setattr("services.media_pipeline.process_photos", fake_transform)
     monkeypatch.setattr("vk.upload.upload_photo_from_file", fake_upload)
     monkeypatch.setattr("workers.publish.upload_photo_from_file", fake_upload)
     monkeypatch.setattr("vk.api.vk_call_safe", lambda fn, **params: fn(**params))
