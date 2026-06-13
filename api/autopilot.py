@@ -80,3 +80,39 @@ async def autopilot_stop():
     app_state.is_autopilot = False
     app_state.add_log('Автопилот остановлен', 'warning')
     return {'status': 'ok', 'message': 'Автопилот остановлен'}
+
+
+# ── Циклы по типам медиа (посты/фото/видео/клипы) ─────────────────
+
+@router.get('/autopilot/loops')
+async def autopilot_loops():
+    from workers.media_autopilot import loops_status
+    return {'status': 'ok', 'loops': loops_status()}
+
+
+@router.post('/autopilot/loop/{media_type}/start')
+async def autopilot_loop_start(media_type: str):
+    from workers.media_autopilot import MEDIA_TYPES, media_loop_worker
+    if media_type not in MEDIA_TYPES:
+        return {'status': 'error', 'message': f'Неизвестный тип медиа: {media_type}'}
+    if app_state.media_loops.get(media_type):
+        return {'status': 'error', 'message': 'Этот цикл уже работает'}
+
+    app_state.media_loops[media_type] = True
+    t = threading.Thread(
+        target=media_loop_worker, args=(media_type,),
+        daemon=True, name=f'media-loop-{media_type}',
+    )
+    t.start()
+    labels = {'posts': 'постов', 'photos': 'фото', 'videos': 'видео', 'clips': 'клипов'}
+    return {'status': 'ok', 'message': f'Цикл {labels[media_type]} запущен'}
+
+
+@router.post('/autopilot/loop/{media_type}/stop')
+async def autopilot_loop_stop(media_type: str):
+    from workers.media_autopilot import MEDIA_TYPES, stop_loop
+    if media_type not in MEDIA_TYPES:
+        return {'status': 'error', 'message': f'Неизвестный тип медиа: {media_type}'}
+    stop_loop(media_type)
+    labels = {'posts': 'постов', 'photos': 'фото', 'videos': 'видео', 'clips': 'клипов'}
+    return {'status': 'ok', 'message': f'Цикл {labels[media_type]} останавливается'}

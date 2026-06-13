@@ -226,7 +226,7 @@ def build_cycle_patch(settings: Dict) -> Dict:
     patch = {
         'download_settings': {
             'posts_to_download': download_count,
-            'check_duplicates': False,
+            'check_duplicates': True,
             'batch_size': 100,
             'delay_min': 0,
             'delay_max': 0,
@@ -293,32 +293,6 @@ def apply_profile_patch(patch: Dict) -> None:
 
 def cycle_status_file(profile_id: Optional[str] = None) -> Path:
     return _profile_dir(profile_id) / 'autopost_cycle_status.json'
-
-
-def _bot_changes_file(profile_id: Optional[str] = None) -> Path:
-    return _profile_dir(profile_id) / 'bot_changes_history.json'
-
-
-def _load_bot_changes() -> List[Dict]:
-    fp = _bot_changes_file()
-    if fp.exists():
-        try:
-            return json.loads(fp.read_text(encoding='utf-8'))
-        except Exception:
-            return []
-    return []
-
-
-def _save_bot_change(change: str) -> None:
-    """Сохранить запись об автоматическом изменении бота (последние 50)."""
-    fp = _bot_changes_file()
-    fp.parent.mkdir(parents=True, exist_ok=True)
-    history = _load_bot_changes()
-    history.insert(0, {
-        'ts': datetime.now().strftime('%d.%m %H:%M'),
-        'text': change,
-    })
-    fp.write_text(json.dumps(history[:50], ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 def save_cycle_status(data: Dict) -> Dict:
@@ -763,14 +737,8 @@ def _run_cycle_worker(settings: Dict) -> None:
         app_state.is_publishing = True
         publish_worker(publish_count)
 
-        # Видео и клипы — после фото, если включены в профиле
-        try:
-            from workers.download import run_media_autopilot
-            status.update({'phase': 'media', 'message': 'Video/clips autopilot'})
-            save_cycle_status(status)
-            run_media_autopilot()
-        except Exception as e:
-            app_state.add_log(f'Growth cycle media: {e}', 'warning')
+        # Видео и клипы — отдельные циклы автопилота (workers/media_autopilot.py),
+        # к growth-циклу постов больше не цепляются
 
         # Заполнить пустые слоты в уже занятых днях очереди VK
         try:
@@ -823,10 +791,7 @@ def _run_cycle_worker(settings: Dict) -> None:
             from services.learning import run_learning_cycle
             status.update({'phase': 'learn', 'message': 'Обучение: анализ конкурентов и своих постов'})
             save_cycle_status(status)
-            learn_result = run_learning_cycle()
-            if learn_result.get('applied_changes'):
-                for change in learn_result['applied_changes']:
-                    _save_bot_change(change)
+            run_learning_cycle()
         except Exception as e:
             app_state.add_log(f'Цикл: обучение: {e}', 'warning')
 

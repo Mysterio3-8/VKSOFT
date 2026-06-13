@@ -21,6 +21,7 @@ async def save_config(config: dict):
         app_state.config['profiles'][pid] = app_state._deep_merge(
             app_state.config['profiles'][pid], config
         )
+        app_state._enforce_fast_post_cycle(app_state.config['profiles'][pid])
         app_state.save_config()
         app_state.add_log('Настройки сохранены', 'info')
         return {'status': 'ok'}

@@ -53,6 +53,119 @@ def _probe_duration(path: Path) -> float:
         return 0.0
 
 
+def _probe_dims(path: Path) -> tuple[int, int]:
+    """Ширина и высота первого видеопотока. (0, 0) если не удалось."""
+    if not shutil.which('ffprobe'):
+        return 0, 0
+    try:
+        out = subprocess.run(
+            ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+             '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', str(path)],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60,
+        )
+        w_str, h_str = out.stdout.decode().strip().splitlines()[0].split('x')[:2]
+        return int(w_str), int(h_str)
+    except Exception:
+        return 0, 0
+
+
+def apply_finishing(
+    video_path: str | Path,
+    *,
+    aspect_mode: str = 'original',
+    blur_strength: int = 20,
+    frame_px: int = 0,
+    frame_color: str = 'black',
+    fade: bool = False,
+    fade_duration: float = 0.6,
+) -> bool:
+    """Второй проход ffmpeg: формат кадра, рамка, фейды. Обрабатывает на месте.
+
+    aspect_mode: original | square_crop | square_blur | vertical_blur (9:16).
+    blur-режимы кладут видео на размытую копию самого себя (плашки по бокам).
+    """
+    path = Path(video_path)
+    need_aspect = aspect_mode in ('square_crop', 'square_blur', 'vertical_blur')
+    if not (need_aspect or frame_px > 0 or fade):
+        return False
+    if not path.exists() or not ffmpeg_available():
+        return False
+
+    w, h = _probe_dims(path)
+    duration = _probe_duration(path)
+    if w <= 0 or h <= 0:
+        return False
+
+    tail: list[str] = []
+    if frame_px > 0:
+        tail.append(f'pad=iw+{2 * frame_px}:ih+{2 * frame_px}:{frame_px}:{frame_px}:color={frame_color}')
+    if fade and duration > fade_duration * 3:
+        fd = fade_duration
+        tail.append(f'fade=t=in:st=0:d={fd:.2f},fade=t=out:st={duration - fd:.2f}:d={fd:.2f}')
+    tail.append('scale=trunc(iw/2)*2:trunc(ih/2)*2')
+    tail_chain = ','.join(tail)
+
+    if aspect_mode in ('square_blur', 'vertical_blur'):
+        if aspect_mode == 'square_blur':
+            side = max(w, h) // 2 * 2
+            canvas_w = canvas_h = side
+        else:
+            canvas_h = max(h, int(w * 16 / 9)) // 2 * 2
+            canvas_w = int(canvas_h * 9 / 16) // 2 * 2
+        if canvas_w <= w + 4 and canvas_h <= h + 4 and not (frame_px > 0 or fade):
+            return False  # уже нужный формат
+        filter_complex = (
+            f'[0:v]split[fg][bgsrc];'
+            f'[bgsrc]scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=increase,'
+            f'crop={canvas_w}:{canvas_h},boxblur={blur_strength}[bg];'
+            f'[bg][fg]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2,{tail_chain}[vout]'
+        )
+    elif aspect_mode == 'square_crop':
+        side = min(w, h) // 2 * 2
+        filter_complex = f'[0:v]crop={side}:{side},{tail_chain}[vout]'
+    else:
+        filter_complex = f'[0:v]{tail_chain}[vout]'
+
+    if fade and duration > fade_duration * 3:
+        fd = fade_duration
+        a_chain = f'afade=t=in:st=0:d={fd:.2f},afade=t=out:st={duration - fd:.2f}:d={fd:.2f}'
+    else:
+        a_chain = 'anull'
+    filter_complex += f';[0:a]{a_chain}[aout]'
+
+    out_path = path.with_name(f'{path.stem}_f.mp4')
+    cmd = [
+        'ffmpeg', '-y', '-i', str(path),
+        '-filter_complex', filter_complex,
+        '-map', '[vout]', '-map', '[aout]',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-movflags', '+faststart', str(out_path),
+    ]
+    try:
+        result = subprocess.run(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            timeout=_FFMPEG_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(f'video_transform finishing: ffmpeg таймаут на {path.name}')
+        out_path.unlink(missing_ok=True)
+        return False
+    except Exception as e:
+        logger.warning(f'video_transform finishing: {e}')
+        out_path.unlink(missing_ok=True)
+        return False
+
+    if result.returncode != 0 or not out_path.exists() or out_path.stat().st_size == 0:
+        err = result.stderr.decode('utf-8', 'ignore')[-400:] if result.stderr else ''
+        logger.warning(f'video_transform finishing: ffmpeg код {result.returncode} {path.name}: {err}')
+        out_path.unlink(missing_ok=True)
+        return False
+
+    out_path.replace(path)
+    return True
+
+
 def _build_video_chain(t: dict) -> str:
     """Видеофильтры (без overlay) одной строкой через запятую."""
     filters: list[str] = []
@@ -258,7 +371,7 @@ def transform_from_profile(video_path: str | Path, profile: dict, *,
 
     logo_path = wm_cfg.get('logo_path', '') if wm_on else None
 
-    return transform_video(
+    result = transform_video(
         video_path,
         transforms,
         logo_path=logo_path,
@@ -267,3 +380,37 @@ def transform_from_profile(video_path: str | Path, profile: dict, *,
         logo_margin=int(wm_cfg.get('logo_margin', 24)),
         metadata=metadata,
     )
+
+    # Финишный проход: формат кадра, рамка, фейды. В hard-режиме параметры
+    # рандомятся на каждое видео; явные значения в конфиге их перебивают.
+    if ap_on:
+        aspect_mode = vt_cfg.get('aspect_mode') or ''
+        if aspect_mode in ('', 'auto'):
+            if is_clip:
+                # Клипы — всегда вертикаль 9:16, blur-плашки если исходник шире
+                aspect_mode = 'vertical_blur'
+            else:
+                aspect_mode = random.choices(
+                    ['original', 'square_blur', 'square_crop'],
+                    weights=[0.45, 0.35, 0.20],
+                )[0]
+
+        fade_cfg = vt_cfg.get('fade')
+        do_fade = fade_cfg if isinstance(fade_cfg, bool) else (random.random() < 0.5)
+
+        frame_px = int(vt_cfg.get('frame_px', 0) or 0)
+        if frame_px == 0 and hard and random.random() < 0.3:
+            frame_px = random.randint(6, 14)
+
+        fin = apply_finishing(
+            video_path,
+            aspect_mode=aspect_mode,
+            blur_strength=random.randint(15, 25),
+            frame_px=frame_px,
+            frame_color=random.choice(['black', 'white']),
+            fade=do_fade,
+            fade_duration=random.uniform(0.4, 0.8),
+        )
+        result = result or fin
+
+    return result

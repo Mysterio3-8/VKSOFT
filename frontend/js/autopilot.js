@@ -167,24 +167,92 @@ function _pollCycleStatus() {
     $('dashGaCycle').textContent = running ? (phase || 'работает') : (phase || 'ожидание');
     if (!running) {
       clearInterval(interval);
-      loadBotChanges();
       loadDashboard();
     }
   }, 3000);
 }
 
-async function loadBotChanges() {
-  const data = await api('/growth/bot_changes').catch(() => null);
-  const el = $('gaBotChangesList');
-  if (!el) return;
-  const changes = data?.changes || [];
-  if (!changes.length) {
-    el.innerHTML = '<div class="form-hint">Ещё нет изменений — запусти цикл.</div>';
-    return;
+// ── Циклы автопилота по типам медиа ──────────────────────────────
+
+const AP_LOOP_LABELS = { posts: 'постов', photos: 'фото', videos: 'видео', clips: 'клипов' };
+const AP_PHASE_LABELS = { working: 'работает', sleeping: 'ждёт', stopped: 'остановлен' };
+
+async function apToggleLoop(type) {
+  const btn = $(`apLoopBtn-${type}`);
+  const running = btn?.dataset.running === '1';
+  const data = await api(`/autopilot/loop/${type}/${running ? 'stop' : 'start'}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  }).catch(error => ({ status: 'error', message: error.message }));
+  notify(message(data, 'Готово'), data.status === 'ok' ? 'success' : 'error');
+  await apRefreshLoops();
+}
+
+async function apRefreshLoops() {
+  const data = await api('/autopilot/loops').catch(() => null);
+  if (!data || !data.loops) return;
+  const active = [];
+  for (const [type, st] of Object.entries(data.loops)) {
+    const btn = $(`apLoopBtn-${type}`);
+    if (btn) {
+      btn.dataset.running = st.running ? '1' : '0';
+      btn.classList.toggle('btn-danger', !!st.running);
+      btn.classList.toggle('btn-primary', !st.running);
+      btn.textContent = st.running ? `■ Стоп ${AP_LOOP_LABELS[type]}` : `Цикл ${AP_LOOP_LABELS[type]}`;
+    }
+    if (st.running) {
+      const phase = AP_PHASE_LABELS[st.phase] || st.phase || 'работает';
+      active.push(`${AP_LOOP_LABELS[type]}: ${phase}${st.next_run ? ` (след. ${st.next_run})` : ''}`);
+    }
+    apFillLoopInput(`apInterval-${type}`, st.interval_min || 180);
+    apFillLoopInput(`apDownload-${type}`, st.download_count || 1);
+    apFillLoopInput(`apPublish-${type}`, st.publish_count || 1);
   }
-  el.innerHTML = changes.slice(0, 10).map(c =>
-    `<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">${esc(c.ts)}</span> ${esc(c.text)}</div>`
-  ).join('');
+  const statusEl = $('gaStatusText');
+  if (statusEl) statusEl.textContent = active.length ? `Работают: ${active.join(' · ')}` : 'Автопилот готов.';
+  const cycleEl = $('dashGaCycle');
+  if (cycleEl) cycleEl.textContent = active.length ? `${active.length} цикл.` : 'ожидание';
+}
+
+function apFillLoopInput(id, value) {
+  const input = $(id);
+  if (input && document.activeElement !== input) input.value = value;
+}
+
+function apLoopSettingsPatch(type) {
+  const interval = num(`apInterval-${type}`) || 1;
+  const downloadCount = num(`apDownload-${type}`) || 1;
+  const publishCount = num(`apPublish-${type}`) || 1;
+  const patch = { autopilot: { intervals: { [type]: interval } } };
+  if (type === 'posts') {
+    patch.download_settings = { posts_to_download: downloadCount };
+    patch.publishing_settings = { posts_to_publish: publishCount };
+  } else if (type === 'photos') {
+    patch.photos_settings = {
+      photos_download_per_run: downloadCount,
+      photos_publish_per_run: publishCount,
+      photos_per_run: publishCount,
+    };
+  } else if (type === 'videos') {
+    patch.videos_settings = {
+      videos_download_per_run: downloadCount,
+      videos_publish_per_run: publishCount,
+      videos_per_run: publishCount,
+    };
+  } else if (type === 'clips') {
+    patch.clips_settings = {
+      clips_download_per_run: downloadCount,
+      clips_publish_per_run: publishCount,
+      clips_per_run: publishCount,
+    };
+  }
+  return patch;
+}
+
+async function apSaveLoopSettings(type) {
+  await post('/config/save', apLoopSettingsPatch(type), 'Настройки цикла сохранены');
+  await apRefreshLoops();
 }
 
 let gaLastRecommendationPatch = null;
@@ -256,46 +324,6 @@ async function checkEngagement() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Проверить engagement'; }
   }
-}
-
-// ── Мониторинг ──────────────────────────────────────────────────────
-
-async function loadMonitor() {
-  const status = await api('/monitor/status').catch(() => ({}));
-  $('monitorStatus').innerHTML = `
-    <div class="stat-card flat"><div class="stat-label">Статус</div><div class="stat-value small">${status.is_monitoring ? 'Работает' : 'Остановлен'}</div><div class="stat-sub">следующая проверка: ${esc(status.next_check || '-')}</div></div>
-  `;
-  setValue('monInterval', status.check_interval || 180);
-  setValue('monMaxCycle', status.max_per_cycle || 2);
-  setValue('monCatchDays', status.catch_up_days || 3);
-  setValue('monMinViews', status.min_views || 0);
-  renderMonitorSources(status.sources || []);
-  const log = await api('/monitor/log').catch(() => ({ logs: [] }));
-  renderLog('monitorLogList', log.logs || []);
-}
-
-function renderMonitorSources(sources) {
-  $('monitorSources').innerHTML = sources.length ? sources.map(source => `
-    <div class="source-item">
-      <div class="source-dot ${source.enabled === false ? 'off' : ''}"></div>
-      <div class="source-info"><div class="source-name">${esc(source.name)}</div><div class="source-id">ID: ${esc(source.community_id)}</div></div>
-      <div class="source-btns"><button class="btn btn-secondary btn-sm" onclick="post('/monitor/sources/toggle', {id:${Number(source.id)}}, 'Источник переключен')">Вкл/выкл</button><button class="btn btn-danger btn-sm" onclick="post('/monitor/sources/remove', {id:${Number(source.id)}}, 'Источник удален')">Удалить</button></div>
-    </div>`).join('') : '<div class="empty"><div class="empty-text">Источников мониторинга нет</div></div>';
-}
-
-async function addMonitorSource() {
-  await post('/monitor/sources/add', { name: val('monSourceName'), community_id: val('monSourceId') }, 'Источник мониторинга добавлен');
-  setValue('monSourceName', '');
-  setValue('monSourceId', '');
-}
-
-async function saveMonitorSettings() {
-  await post('/monitor/settings', {
-    check_interval_min: num('monInterval'),
-    max_per_cycle: num('monMaxCycle'),
-    catch_up_days: num('monCatchDays'),
-    min_views: num('monMinViews'),
-  }, 'Мониторинг сохранен');
 }
 
 // ── Логи ─────────────────────────────────────────────────────────────
@@ -472,15 +500,3 @@ async function applyLibraryNiche() {
   await post('/library/apply_niche', { niche: val('libraryNiche') }, 'Пресет применен');
 }
 
-async function addLibraryEntry() {
-  await post('/library/entry/add', { text: val('libraryEntryText'), tags: val('libraryEntryTags') }, 'Заготовка добавлена');
-  setValue('libraryEntryText', '');
-  setValue('libraryEntryTags', '');
-}
-
-async function addLibraryPoll() {
-  const answers = val('libraryPollAnswers').split(',').map(x => x.trim()).filter(Boolean);
-  await post('/library/poll/add', { question: val('libraryPollQuestion'), answers }, 'Опрос добавлен');
-  setValue('libraryPollQuestion', '');
-  setValue('libraryPollAnswers', '');
-}

@@ -18,6 +18,8 @@ htmlcov/
 *.part
 *.tmp
 *.log
+*.backup
+test_artifacts/
 
 .DS_Store
 Thumbs.db

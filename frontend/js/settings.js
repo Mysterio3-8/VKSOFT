@@ -9,16 +9,15 @@ function renderSettings() {
   const filters = cfg.filters || {};
   const anti = cfg.antiplagiaat || {};
   const peak = cfg.peak_hours || {};
-  const polls = cfg.polls || {};
 
   setValue('userToken', vk.user_token || '');
   setValue('groupToken', vk.group_token || '');
   setValue('postsToDownload', dl.posts_to_download || 100);
-  setValue('downloadDelayMin', dl.delay_min ?? 3);
-  setValue('downloadDelayMax', dl.delay_max ?? 6);
+  setValue('downloadDelayMin', dl.delay_min ?? 0);
+  setValue('downloadDelayMax', dl.delay_max ?? 0);
   setChecked('checkDuplicates', false);
   if ($('checkDuplicates')) $('checkDuplicates').disabled = true;
-  setValue('postsToPublish', pub.posts_to_publish || 50);
+  setValue('postsToPublish', pub.posts_to_publish || 100);
   setValue('publishDelayMin', pub.publish_delay_min ?? 7200);
   setValue('publishDelayMax', pub.publish_delay_max ?? 10800);
   setChecked('postponedEnabled', pub.postponed_enabled !== false);
@@ -43,10 +42,6 @@ function renderSettings() {
   setValue('adStopKeywords', (filters.ad_stop_keywords || []).join(', '));
   setValue('blockKeywords', (filters.block_keywords || []).join(', '));
   setValue('minContentLength', filters.min_content_length || 0);
-  setChecked('pollsEnabled', polls.enabled);
-  setValue('pollFrequency', polls.frequency || 5);
-  setChecked('pollAnonymous', polls.is_anonymous !== false);
-  setChecked('pollMultiple', polls.multiple);
   loadLastScheduled();
 
   const wm = cfg.watermark || {};
@@ -79,15 +74,18 @@ function collectSettings() {
     },
     download_settings: {
       posts_to_download: num('postsToDownload') || 100,
-      delay_min: num('downloadDelayMin'),
-      delay_max: num('downloadDelayMax'),
-      check_duplicates: false,
+      delay_min: 0,
+      delay_max: 0,
+      check_duplicates: true,
+      batch_size: 100,
+      max_photos_per_post: 2,
     },
     publishing_settings: {
-      posts_to_publish: num('postsToPublish') || 50,
+      posts_to_publish: num('postsToPublish') || 100,
       publish_delay_min: num('publishDelayMin') || 7200,
       publish_delay_max: num('publishDelayMax') || 10800,
       postponed_enabled: checked('postponedEnabled'),
+      skip_vk_sync: true,
       publish_hours_enabled: checked('publishHoursEnabled'),
       publish_hours_start: num('publishStart'),
       publish_hours_end: num('publishEnd'),
@@ -133,12 +131,6 @@ function collectSettings() {
       opacity: num('wmOpacity') ?? 180,
       color: [r, g, b],
       logo_scale: parseFloat(val('wmLogoScale') || '0.12'),
-    },
-    polls: {
-      enabled: checked('pollsEnabled'),
-      frequency: Math.max(1, num('pollFrequency') || 5),
-      is_anonymous: checked('pollAnonymous'),
-      multiple: checked('pollMultiple'),
     },
   };
 }
@@ -201,52 +193,6 @@ async function savePastedToken() {
 
 async function validateTokens() {
   await post('/tokens/validate', {}, 'Токены проверены');
-}
-
-async function loadMediaStatus() {
-  const data = await api('/media/status').catch(() => ({}));
-  const types = [
-    ['photos', 'Фото', 'photos_settings'],
-    ['videos', 'Видео', 'videos_settings'],
-    ['clips', 'Клипы', 'clips_settings'],
-  ];
-  $('mediaCards').innerHTML = types.map(([key, label, settingsKey]) => {
-    const media = data[key] || {};
-    const cfg = state.config?.[settingsKey] || {};
-    const busy = media.is_downloading || media.is_publishing;
-    return `<div class="card">
-      <div class="card-header"><div class="card-title"><span class="icon">VK</span>${label}</div><span class="badge ${busy ? 'badge-warning' : 'badge-neutral'}">${media.is_downloading ? 'скачивает' : media.is_publishing ? 'публикует' : 'готово'}</span></div>
-      <div class="stat-card flat"><div class="stat-label">Очередь</div><div class="stat-value">${media.queue || 0}</div><div class="stat-sub">${cfg.enabled === false && key === 'photos' ? 'выключено в настройках' : 'готово к работе'}</div></div>
-      <div class="button-row">
-        <button class="btn btn-secondary btn-sm" onclick="post('/media/${key}/download/start', {}, 'Загрузка ${label.toLowerCase()} запущена')">Скачать</button>
-        <button class="btn btn-primary btn-sm" onclick="post('/media/${key}/publish/start', {}, 'Публикация ${label.toLowerCase()} запущена')">Публиковать</button>
-        <button class="btn btn-ghost btn-sm" onclick="post('/media/${key}/download/stop', {}, 'Загрузка остановлена')">Стоп загрузки</button>
-        <button class="btn btn-ghost btn-sm" onclick="post('/media/${key}/publish/stop', {}, 'Публикация остановлена')">Стоп публикации</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function renderMediaSettings() {
-  const photos = state.config?.photos_settings || {};
-  const videos = state.config?.videos_settings || {};
-  const clips = state.config?.clips_settings || {};
-  setChecked('photosEnabled', photos.enabled);
-  setValue('photosPerRun', photos.photos_per_run || 50);
-  setChecked('videosWallPost', videos.create_wall_post !== false);
-  setValue('videosPerRun', videos.videos_per_run || 10);
-  setValue('videosMaxMb', videos.max_filesize_mb || 500);
-  setChecked('clipsWallPost', clips.create_wall_post !== false);
-  setValue('clipsPerRun', clips.clips_per_run || 10);
-  setValue('clipsMaxSec', clips.max_duration_sec || 180);
-}
-
-async function saveMediaSettings() {
-  await post('/config/save', {
-    photos_settings: { enabled: checked('photosEnabled'), photos_per_run: num('photosPerRun') || 50, publish_delay_min: 7200, publish_delay_max: 10800, create_wall_post: true },
-    videos_settings: { enabled: true, create_wall_post: checked('videosWallPost'), videos_per_run: num('videosPerRun') || 10, max_filesize_mb: num('videosMaxMb') || 500 },
-    clips_settings: { enabled: true, create_wall_post: checked('clipsWallPost'), clips_per_run: num('clipsPerRun') || 10, max_duration_sec: num('clipsMaxSec') || 180 },
-  }, 'Медиа настройки сохранены');
 }
 
 async function uploadLogoFile(file) {

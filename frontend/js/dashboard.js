@@ -37,15 +37,11 @@ async function loadDashboard() {
   $('statErrors').textContent = data.errors_today ?? 0;
   $('queueCount').textContent = data.pending ?? 0;
   $('statErrorsCard').classList.toggle('has-errors', Number(data.errors_today || 0) > 0);
-  setHealth('healthDownload', data.is_downloading);
-  setHealth('healthPublish', data.is_publishing);
-  setHealth('healthMonitor', data.is_monitoring);
-  const busy = data.is_downloading || data.is_publishing || data.is_monitoring;
+  const busy = data.is_downloading || data.is_publishing;
   $('statusDot').classList.toggle('busy', !!busy);
   $('statusText').textContent = busy ? 'Работает' : 'Готов';
   if (growthData?.status === 'ok') renderDashboardGrowth(growthData);
   else await loadDashboardGrowth();
-  await loadDownloadProgress();
   await loadGrowth();
 }
 
@@ -74,7 +70,7 @@ function renderDashboardGrowth(data) {
   $('dashGaViews').textContent = tracker.avg_views ?? 0;
   $('dashGaLikes').textContent = `лайки: ${tracker.avg_likes ?? 0}, проверено: ${tracker.checked ?? 0}`;
   if (data.phash_size != null && $('dashGaPhash')) $('dashGaPhash').textContent = `pHash: ${data.phash_size}`;
-  $('dashGaCycle').textContent = cycle.running ? (cycle.phase || 'работает') : (cycle.phase || 'ожидание');
+  // dashGaCycle обновляет apRefreshLoops (autopilot.js) — циклы по типам медиа
   $('dashGaQueue').textContent = `сегодня: ${dashboard.published_today ?? 0}`;
   if ($('dashGaQueue2')) $('dashGaQueue2').textContent = dashboard.pending ?? 0;
 
@@ -91,80 +87,6 @@ function renderDashboardGrowth(data) {
   } else {
     $('gaStatusText').textContent = 'Автопилот готов.';
   }
-  loadBotChanges();
-}
-
-function setHealth(id, enabled) {
-  const el = $(id);
-  if (!el) return;
-  el.classList.toggle('ok', !!enabled);
-  el.querySelector('b').textContent = enabled ? 'идет' : 'нет';
-}
-
-async function loadDownloadProgress() {
-  const data = await api('/download/progress').catch(() => ({}));
-  if (!$('progressTitle') || !$('downloadProgressBar')) return;
-  const percent = Number(data.percent || 0);
-  const busyDownload = !!data.is_downloading;
-  const busyPublish = !!data.is_publishing;
-  const busy = busyDownload || busyPublish;
-  const phaseLabel = data.phase === 'publish' ? 'Публикация' : data.phase === 'download' ? 'Загрузка' : 'Прогресс';
-  $('progressTitle').textContent = phaseLabel;
-  $('progressPercent').textContent = `${percent}%`;
-  $('downloadProgressBar').style.width = `${percent}%`;
-  $('downloadProgressText').textContent = busy
-    ? `${data.message || phaseLabel}: ${data.current || 0} из ${data.total || 0}, источник: ${data.source || '-'}`
-    : 'Сейчас загрузка не идет';
-
-  ['btnDownloadMenu', 'btnPublishQueue'].forEach(id => { if ($(id)) $(id).disabled = busy; });
-  document.querySelectorAll('[data-download-source]').forEach(btn => { btn.disabled = busy || btn.dataset.enabled === 'false'; });
-  if ($('btnStopDownload')) $('btnStopDownload').disabled = !busyDownload;
-  if ($('btnStopPublish')) $('btnStopPublish').disabled = !busyPublish;
-}
-
-function renderDownloadMenu() {
-  const menu = $('downloadMenu');
-  if (!menu) return;
-  const sources = state.config?.sources || [];
-  const enabledSources = sources.filter(source => source.enabled !== false);
-  const allDisabled = enabledSources.length === 0;
-  const sourceItems = sources.map(source => {
-    const enabled = source.enabled !== false;
-    return `
-      <button class="action-menu-item" type="button" data-download-source="${escAttr(source.community_id)}" data-enabled="${enabled ? 'true' : 'false'}" ${enabled ? '' : 'disabled'} onclick="downloadOne('${escAttr(source.community_id)}')">
-        <span>${esc(source.name || source.community_id || 'Источник')}</span>
-        <small>${enabled ? `ID: ${esc(source.community_id)}` : `Выключен · ID: ${esc(source.community_id)}`}</small>
-      </button>`;
-  }).join('');
-
-  menu.innerHTML = `
-    <button class="action-menu-item action-menu-primary" type="button" data-download-source="all" data-enabled="${allDisabled ? 'false' : 'true'}" ${allDisabled ? 'disabled' : ''} onclick="downloadAllSources()">
-      <span>Все источники</span>
-      <small>${enabledSources.length ? `${enabledSources.length} активных` : 'Нет активных источников'}</small>
-    </button>
-    ${sources.length ? '<div class="action-menu-separator"></div>' : ''}
-    ${sources.length ? sourceItems : '<div class="action-menu-empty">Источников пока нет</div>'}
-  `;
-}
-
-async function toggleDownloadMenu(event) {
-  event?.stopPropagation();
-  if (!state.config) {
-    await loadConfig().catch(() => {});
-  }
-  renderDownloadMenu();
-  const menu = $('downloadMenu');
-  if (!menu) return;
-  menu.classList.toggle('active');
-}
-
-function closeDownloadMenu() {
-  $('downloadMenu')?.classList.remove('active');
-}
-
-async function downloadAllSources() {
-  closeDownloadMenu();
-  await post('/download/start_all', {}, 'Загрузка запущена');
 }
 
 async function loadAllStats() {

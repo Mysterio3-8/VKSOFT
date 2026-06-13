@@ -17,9 +17,7 @@ const titles = {
   dashboard: 'Дашборд',
   channels: 'Каналы',
   settings: 'Настройки',
-  media: 'Медиа',
   library: 'Библиотека',
-  monitor: 'Мониторинг',
   allstats: 'Все каналы',
   logs: 'Логи',
 };
@@ -98,9 +96,7 @@ function switchTab(tab) {
 function renderActiveTab(tab = document.querySelector('.tab-content.active')?.id || 'dashboard') {
   if (tab === 'channels') { renderProfiles(); renderSources(); }
   if (tab === 'settings') renderSettings();
-  if (tab === 'media') { renderMediaSettings(); loadMediaStatus(); }
   if (tab === 'library') loadLibrary();
-  if (tab === 'monitor') loadMonitor();
   if (tab === 'allstats') loadAllStats();
   if (tab === 'logs') loadLogs();
 }

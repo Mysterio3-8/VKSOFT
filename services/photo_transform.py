@@ -12,7 +12,7 @@ from pathlib import Path
 from config import logger
 
 try:
-    from PIL import Image, ImageEnhance
+    from PIL import Image, ImageEnhance, ImageFilter, ImageOps
     _PIL_OK = True
 except ImportError:
     _PIL_OK = False
@@ -74,6 +74,88 @@ def apply_mirror(image_path: str | Path) -> bool:
         return True
     except Exception as e:
         logger.warning(f"photo_transform mirror: {e}")
+        return False
+
+
+def apply_blur_pad(image_path: str | Path, target_ratio: float = 1.0, blur_radius: int = 30) -> bool:
+    """Довести фото до target_ratio (1.0 = квадрат) размытыми плашками по бокам.
+
+    Фон — увеличенная и размытая копия самого фото, оригинал по центру.
+    """
+    if not _PIL_OK:
+        return False
+    path = Path(image_path)
+    if not path.exists():
+        return False
+    try:
+        img = Image.open(path).convert("RGB")
+        w, h = img.size
+        if target_ratio <= 0:
+            target_ratio = 1.0
+        if w / h >= target_ratio:
+            canvas_w, canvas_h = w, int(round(w / target_ratio))
+        else:
+            canvas_w, canvas_h = int(round(h * target_ratio)), h
+        if abs(canvas_w - w) < 4 and abs(canvas_h - h) < 4:
+            return True  # уже нужное соотношение — плашки не нужны
+
+        scale = max(canvas_w / w, canvas_h / h)
+        bg = img.resize((int(w * scale) + 1, int(h * scale) + 1), Image.LANCZOS)
+        left = (bg.width - canvas_w) // 2
+        top = (bg.height - canvas_h) // 2
+        bg = bg.crop((left, top, left + canvas_w, top + canvas_h))
+        bg = bg.filter(ImageFilter.GaussianBlur(blur_radius))
+        bg.paste(img, ((canvas_w - w) // 2, (canvas_h - h) // 2))
+        bg.save(path, quality=95)
+        return True
+    except Exception as e:
+        logger.warning(f"photo_transform blur_pad: {e}")
+        return False
+
+
+def apply_frame(image_path: str | Path, width_px: int = 0, color: tuple = (255, 255, 255)) -> bool:
+    """Тонкая рамка вокруг фото. width_px=0 — авто (~1% меньшей стороны)."""
+    if not _PIL_OK:
+        return False
+    path = Path(image_path)
+    if not path.exists():
+        return False
+    try:
+        img = Image.open(path).convert("RGB")
+        border = width_px or max(2, int(min(img.size) * 0.01))
+        framed = ImageOps.expand(img, border=border, fill=color)
+        framed.save(path, quality=95)
+        return True
+    except Exception as e:
+        logger.warning(f"photo_transform frame: {e}")
+        return False
+
+
+def apply_fake_metadata(image_path: str | Path) -> bool:
+    """Стереть EXIF оригинала и записать свои правдоподобные метаданные."""
+    if not _PIL_OK:
+        return False
+    path = Path(image_path)
+    if not path.exists():
+        return False
+    try:
+        img = Image.open(path).convert("RGB")
+        exif = Image.Exif()
+        make, model = random.choice([
+            ('Apple', 'iPhone 14'), ('Apple', 'iPhone 15 Pro'),
+            ('Samsung', 'SM-S918B'), ('Xiaomi', '2210132G'),
+            ('Canon', 'Canon EOS 250D'),
+        ])
+        exif[271] = make          # Make
+        exif[272] = model         # Model
+        exif[306] = (             # DateTime — случайная дата за последний год
+            f'2025:{random.randint(1, 12):02d}:{random.randint(1, 28):02d} '
+            f'{random.randint(8, 22):02d}:{random.randint(0, 59):02d}:{random.randint(0, 59):02d}'
+        )
+        img.save(path, "JPEG", quality=95, optimize=True, exif=exif)
+        return True
+    except Exception as e:
+        logger.warning(f"photo_transform fake_metadata: {e}")
         return False
 
 

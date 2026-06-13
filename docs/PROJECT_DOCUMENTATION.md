@@ -156,7 +156,7 @@ storage/{profile_id}/phash_cache.json
 - `publishQueue()` - запускает публикацию указанного количества постов из dashboard.
 - `loadDownloadProgress()` - прогресс загрузки/публикации.
 - `loadDashboard()`, `renderDashboardGrowth()` - dashboard и growth cards.
-- `loadMediaStatus()`, `saveMediaSettings()` - фото/видео/клипы.
+- `apSaveLoopSettings(type)` - сохраняет интервал, скачивание и публикацию для цикла посты/фото/видео/клипы.
 - `loadLibrary()`, `saveLibrarySettings()`, `addLibraryEntry()`, `addLibraryPoll()` - библиотека подписей.
 - `loadMonitor()`, `saveMonitorSettings()`, `addMonitorSource()` - мониторинг новостей.
 - `loadLogs()`, `setLogFilter()`, `clearLogs()` - логи.
@@ -212,12 +212,9 @@ storage/{profile_id}/phash_cache.json
 - `GET /api/dashboard` - базовые метрики.
 - `GET /api/dashboard/growth` - dashboard + growth/subscribers/tracker/autopilot.
 
-### `api/media.py`
+### Ручные media API
 
-- Фото: `/media/photos/download/start`, `/stop`, `/publish/start`, `/publish/stop`, `/status`.
-- Видео: `/media/videos/download/start`, `/stop`, `/publish/start`, `/publish/stop`, `/status`.
-- Клипы: `/media/clips/download/start`, `/stop`, `/publish/start`, `/publish/stop`, `/status`.
-- `GET /api/media/status` - общий статус медиа.
+Ручная вкладка медиа и `/api/media/...` маршруты удалены. Фото/видео/клипы запускаются через циклы автопилота.
 
 ### `api/monitor.py`
 
@@ -266,9 +263,34 @@ storage/{profile_id}/phash_cache.json
 - `_download_source()` - скачать посты из одного VK community.
 - `download_worker()` - поток загрузки одного источника.
 - `download_all_worker()` - загрузить все включенные источники.
-- `download_then_publish_worker()` - загрузка + публикация.
-- `run_media_autopilot()` - дополнительно запускает фото/видео/клипы.
+- `download_then_publish_worker()` - загрузка + публикация (только посты).
 - `post_passes_filters()` - фильтры постов.
+
+### `workers/media_autopilot.py`
+
+Циклы автопилота по типам медиа: посты, фото, видео, клипы. Каждый тип —
+свой daemon-поток: скачать → антиплагиат → опубликовать → пауза → повтор.
+Циклы независимы и могут работать параллельно.
+
+- `media_loop_worker(media_type)` - бесконечный цикл одного типа.
+- `loop_interval_min(media_type)` - интервал из `autopilot.intervals.{type}` (дефолт 180 мин).
+- `loop_download_count(media_type)` / `loop_publish_count(media_type)` - отдельные лимиты скачивания и публикации за проход.
+- `stop_loop(media_type)` - остановить цикл + прервать текущую работу типа.
+- `loops_status()` - статус всех циклов для UI.
+
+API: `GET /api/autopilot/loops`, `POST /api/autopilot/loop/{type}/start|stop`.
+
+### `services/media_pipeline.py`
+
+Единый антиплагиат для любого медиа:
+
+- `process_photos(paths, profile)` - кроп, цветовой сдвиг, зеркало (одно случайное),
+  blur-плашки до квадрата, рамка, вотермарка, подмена EXIF. В hard-режиме
+  (antiplagiaat.enabled) рамка/плашки применяются случайно.
+- `process_video(path, profile, title, is_clip)` - делегирует в
+  `services/video_transform.transform_from_profile`: кроп, вырез фрагмента,
+  лого, скорость, шум + финишный проход `apply_finishing` (квадрат/вертикаль
+  9:16 с blur-плашками, рамка, фейды in/out). Клипы всегда приводятся к 9:16.
 
 ### `workers/publish.py`
 
@@ -441,18 +463,18 @@ storage/<profile_id>/failed_posts/
 
 This prevents repeated `[Слоты]` errors on the same missing `downloaded_posts/*.json` or `photos/*/photo_*.jpg` path.
 
-### Duplicate checks are disabled before anti-plagiarism
+### Duplicate checks stay enabled
 
-The bot now treats downloaded posts as publish candidates even if pHash or old queue checks would call them duplicates. Active and default settings were changed to:
+The bot always skips exact post duplicates by `source_id + post_id`: posts already in the local queue and posts already marked as used after publishing are not downloaded again. Active and default settings are:
 
 ```json
 {
-  "download_settings": { "check_duplicates": false },
+  "download_settings": { "check_duplicates": true },
   "phash": { "enabled": false }
 }
 ```
 
-`workers/download.py` also ignores pHash duplicate skipping at runtime. This is intentional: anti-plagiarism changes the final post before publishing, so dropping candidates during download can make the cycle scan forever without filling the queue.
+`workers/download.py` still ignores pHash duplicate skipping at runtime. This is intentional: anti-plagiarism changes the final media before publishing, so visual-similarity checks can reject useful candidates too early. Exact source/post duplicates remain blocked.
 
 ### Regression tests added
 

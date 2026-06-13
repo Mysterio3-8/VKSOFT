@@ -83,14 +83,7 @@ async function removeSource(id) {
 }
 
 async function downloadOne(community_id) {
-  closeDownloadMenu();
   await post('/download/start', { community_id, count: state.config?.download_settings?.posts_to_download || 100 }, 'Загрузка источника запущена');
-}
-
-async function publishQueue() {
-  const configuredCount = state.config?.publishing_settings?.posts_to_publish || 50;
-  const quickCount = Math.max(1, Math.min(50, num('quickPublishCount') || configuredCount));
-  await post('/publish/start', { count: quickCount }, 'Публикация запущена');
 }
 
 async function searchSources() {

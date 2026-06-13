@@ -42,8 +42,10 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=subscriber_tracker_loop, daemon=True, name='sub_tracker').start()
     from services.competitor import competitor_scan_loop
     from services.learning import learning_loop
+    from workers.repeat_winners import repeat_winners_loop
     threading.Thread(target=competitor_scan_loop, daemon=True, name='competitor_scan').start()
     threading.Thread(target=learning_loop, daemon=True, name='learning').start()
+    threading.Thread(target=repeat_winners_loop, daemon=True, name='repeat_winners').start()
     app_state.add_log('VK Post Bot запущен ✅', 'info')
     yield
     app_state.is_downloading = app_state.is_publishing = False
@@ -59,6 +61,7 @@ app.add_middleware(
     allow_headers=['*'],
 )
 app.mount('/static', StaticFiles(directory=str(FRONTEND_DIR)), name='static')
+app.mount('/js', StaticFiles(directory=str(FRONTEND_DIR / 'js')), name='frontend-js')
 
 
 # ── Static routes ────────────────────────────────────────────────
@@ -90,7 +93,6 @@ from api.cleanup import router as cleanup_router
 from api.logs import router as logs_router
 from api.tests import router as tests_router
 from api.growth import router as growth_router
-from api.media import router as media_router
 from api.library import router as library_router
 from api.autopilot import router as autopilot_router
 from api.tokens import router as tokens_router
@@ -108,7 +110,6 @@ app.include_router(cleanup_router, prefix='/api')
 app.include_router(logs_router, prefix='/api')
 app.include_router(tests_router, prefix='/api')
 app.include_router(growth_router, prefix='/api')
-app.include_router(media_router, prefix='/api')
 app.include_router(library_router, prefix='/api')
 app.include_router(autopilot_router, prefix='/api')
 app.include_router(tokens_router, prefix='/api')

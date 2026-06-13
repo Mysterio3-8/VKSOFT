@@ -14,6 +14,139 @@ from config import app_state, STORAGE_DIR
 router = APIRouter()
 
 
+# ── Обучаемые подписи ────────────────────────────────────────────
+
+@router.get('/growth/caption_stats')
+async def caption_stats():
+    """Статистика подписей по семействам и форматам + текущие веса выбора."""
+    try:
+        from services.content_library import load_library
+        from services.tracker import get_caption_stats
+        lib = load_library()
+        return {
+            'status': 'ok',
+            'stats': {
+                'all': get_caption_stats(),
+                'photo': get_caption_stats('photo'),
+                'clip': get_caption_stats('clip'),
+            },
+            'category_weights': lib.get('category_weights', {}),
+        }
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.get('/growth/post_scores')
+async def post_scores():
+    """Нормированные score постов + медианные базы по форматам."""
+    try:
+        from services.tracker import build_format_baselines, get_scored_posts, get_all
+        scored = sorted(get_scored_posts(), key=lambda p: p.get('norm_score', 0), reverse=True)
+        return {
+            'status': 'ok',
+            'baselines': build_format_baselines(get_all()),
+            'top': scored[:20],
+            'bottom': scored[-20:][::-1],
+            'total': len(scored),
+        }
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.get('/growth/boost_candidates')
+async def boost_candidates():
+    """Победители для платного буста: score ≥ 2.0 (Scale-порог отчёта)."""
+    try:
+        from services.tracker import get_scored_posts
+        group_id = str(app_state.profile.get('vk', {}).get('group_id', '')).lstrip('-')
+        winners = [
+            {
+                **p,
+                'url': f'https://vk.com/wall-{group_id}_{p["post_id"]}',
+            }
+            for p in get_scored_posts() if p.get('norm_score', 0) >= 2.0
+        ]
+        winners.sort(key=lambda p: p['norm_score'], reverse=True)
+        return {'status': 'ok', 'candidates': winners[:20], 'total': len(winners)}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.get('/growth/weekly_report')
+async def weekly_report():
+    """Сводка для недельной ревизии: winners/losers, семейства, источники."""
+    try:
+        from services.content_library import load_library
+        from services.source_quality import load_states
+        from services.tracker import get_caption_stats, get_overlay_stats, get_scored_posts
+
+        week_ago = int(time.time()) - 7 * 86400
+        scored = get_scored_posts()
+        recent = [p for p in scored if int(p.get('published_at', 0)) >= week_ago]
+        recent.sort(key=lambda p: p.get('norm_score', 0), reverse=True)
+        return {
+            'status': 'ok',
+            'posts_week': len(recent),
+            'winners': recent[:10],
+            'losers': recent[-10:][::-1] if len(recent) > 10 else [],
+            'caption_stats': {
+                'photo': get_caption_stats('photo'),
+                'clip': get_caption_stats('clip'),
+            },
+            'overlay_stats': get_overlay_stats(),
+            'category_weights': load_library().get('category_weights', {}),
+            'sources': load_states(),
+        }
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.get('/growth/source_quality')
+async def source_quality():
+    """Белые/стоп-листы источников по rolling median score."""
+    try:
+        from services.source_quality import load_states
+        return {'status': 'ok', 'sources': load_states()}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.post('/growth/source_quality_recalc')
+async def source_quality_recalc():
+    """Пересчитать статусы источников прямо сейчас."""
+    try:
+        from services.source_quality import update_source_states
+        return {'status': 'ok', 'sources': update_source_states()}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+# ── Повтор победителей ───────────────────────────────────────────
+
+@router.post('/growth/repeat_winner_run')
+async def repeat_winner_run():
+    """Переиздать одного победителя прямо сейчас (вручную)."""
+    try:
+        from workers.repeat_winners import run_repeat_winner
+        return run_repeat_winner()
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
+@router.get('/growth/repeat_winners_state')
+async def repeat_winners_state():
+    """Настройки и последний отчёт цикла повторов."""
+    try:
+        from workers.repeat_winners import load_settings, _load_state
+        return {
+            'status': 'ok',
+            'settings': load_settings(app_state.profile),
+            'state': _load_state(),
+        }
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)}
+
+
 # ── 8. Поиск источников по нише ─────────────────────────────────
 
 @router.get('/growth/search_sources')
@@ -315,16 +448,6 @@ async def get_competitor_insights_api():
         from services.competitor import get_competitor_insights
         insights = get_competitor_insights(app_state.active_profile_id)
         return {'status': 'ok', 'data': insights}
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)}
-
-
-@router.get('/growth/bot_changes')
-async def get_bot_changes():
-    """История автоматических изменений, которые бот применил сам."""
-    try:
-        from services.growth_autopilot import _load_bot_changes
-        return {'status': 'ok', 'changes': _load_bot_changes()}
     except Exception as e:
         return {'status': 'error', 'message': str(e)}
 

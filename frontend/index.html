@@ -23,9 +23,8 @@
     <button class="nav-item active" data-tab="dashboard">Дашборд</button>
     <button class="nav-item" data-tab="channels">Каналы</button>
     <button class="nav-item" data-tab="settings">Настройки</button>
-    <button class="nav-item" data-tab="media">Медиа</button>
+    
     <button class="nav-item" data-tab="library">Библиотека</button>
-    <button class="nav-item" data-tab="monitor">Мониторинг</button>
     <button class="nav-item" data-tab="allstats">Все каналы</button>
     <button class="nav-item" data-tab="logs">Логи</button>
     <button class="nav-item" onclick="window.location='/niche'">Ниши</button>
@@ -63,62 +62,51 @@
         </div>
       </div>
 
-      <!-- скрытые элементы для JS-совместимости -->
-      <div style="display:none">
-        <span id="healthDownload"><b></b></span>
-        <span id="healthPublish"><b></b></span>
-        <span id="healthMonitor"><b></b></span>
-        <div data-compat="downloadMenu"></div>
-        <button data-compat="btnDownloadMenu"></button>
-        <button data-compat="btnPublishQueue"></button>
-        <button data-compat="btnStopDownload"></button>
-        <button data-compat="btnStopPublish"></button>
-        <input data-compat="quickPublishCount" value="2">
-        <div data-compat="progressTitle"></div>
-        <span data-compat="progressPercent"></span>
-        <div data-compat="downloadProgressBar"></div>
-        <div data-compat="downloadProgressText"></div>
-      </div>
-
-
-      <div class="card queue-card">
-        <div class="card-header">
-          <div>
-            <div class="card-title">Очередь и публикация</div>
-            <div class="card-subtitle">Скачать посты, поставить в VK и остановить процесс</div>
-          </div>
-          <div class="quick-publish">
-            <label class="form-label" for="quickPublishCount">Постов</label>
-            <input class="form-input" id="quickPublishCount" type="number" min="1" max="50" value="2">
-          </div>
-        </div>
-        <div class="queue-actions">
-          <div class="action-menu-wrap">
-            <button class="btn btn-primary action-btn" id="btnDownloadMenu" type="button" onclick="toggleDownloadMenu()">Скачать</button>
-            <div class="action-menu" id="downloadMenu"></div>
-          </div>
-          <button class="btn btn-secondary" id="btnPublishQueue" type="button" onclick="publishQueue()">Опубликовать очередь</button>
-          <button class="btn btn-ghost" id="btnStopDownload" type="button" onclick="stopDownload()">Стоп скачивание</button>
-          <button class="btn btn-ghost" id="btnStopPublish" type="button" onclick="stopPublish()">Стоп публикация</button>
-        </div>
-        <div class="progress-block">
-          <div class="progress-meta">
-            <span id="progressTitle">Ожидание</span>
-            <span id="progressPercent">0%</span>
-          </div>
-          <div class="progress-track"><div class="progress-fill" id="downloadProgressBar"></div></div>
-          <div class="form-hint" id="downloadProgressText">Нет активной задачи</div>
-        </div>
-      </div>
-
       <div class="card" id="dashboardGrowthCard">
         <div class="card-header">
           <div class="card-title">Автопилот</div>
         </div>
 
-        <!-- Главная кнопка -->
+        <!-- Циклы по типам медиа -->
         <div style="padding:12px 16px 8px">
-          <button class="btn btn-primary" style="width:100%;font-size:15px;padding:10px" onclick="gaStartCycle()" id="btnStartCycle">Запустить цикл</button>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div class="form-section" id="apCycleSettings-posts">
+              <button class="btn btn-primary" style="width:100%;font-size:14px;padding:10px" onclick="apToggleLoop('posts')" id="apLoopBtn-posts">Цикл постов</button>
+              <div class="grid-3" style="gap:6px;margin-top:8px">
+                <div class="form-group"><label class="form-label">Интервал</label><input class="form-input" id="apInterval-posts" type="number" min="1" placeholder="180"></div>
+                <div class="form-group"><label class="form-label">Скачать</label><input class="form-input" id="apDownload-posts" type="number" min="1" placeholder="100"></div>
+                <div class="form-group"><label class="form-label">Опубл.</label><input class="form-input" id="apPublish-posts" type="number" min="1" placeholder="100"></div>
+              </div>
+              <button class="btn btn-secondary btn-sm" style="width:100%" onclick="apSaveLoopSettings('posts')" id="apSave-posts">Сохранить</button>
+            </div>
+            <div class="form-section" id="apCycleSettings-photos">
+              <button class="btn btn-primary" style="width:100%;font-size:14px;padding:10px" onclick="apToggleLoop('photos')" id="apLoopBtn-photos">Цикл фото</button>
+              <div class="grid-3" style="gap:6px;margin-top:8px">
+                <div class="form-group"><label class="form-label">Интервал</label><input class="form-input" id="apInterval-photos" type="number" min="1" placeholder="180"></div>
+                <div class="form-group"><label class="form-label">Скачать</label><input class="form-input" id="apDownload-photos" type="number" min="1" placeholder="50"></div>
+                <div class="form-group"><label class="form-label">Опубл.</label><input class="form-input" id="apPublish-photos" type="number" min="1" placeholder="50"></div>
+              </div>
+              <button class="btn btn-secondary btn-sm" style="width:100%" onclick="apSaveLoopSettings('photos')" id="apSave-photos">Сохранить</button>
+            </div>
+            <div class="form-section" id="apCycleSettings-videos">
+              <button class="btn btn-primary" style="width:100%;font-size:14px;padding:10px" onclick="apToggleLoop('videos')" id="apLoopBtn-videos">Цикл видео</button>
+              <div class="grid-3" style="gap:6px;margin-top:8px">
+                <div class="form-group"><label class="form-label">Интервал</label><input class="form-input" id="apInterval-videos" type="number" min="1" placeholder="180"></div>
+                <div class="form-group"><label class="form-label">Скачать</label><input class="form-input" id="apDownload-videos" type="number" min="1" placeholder="10"></div>
+                <div class="form-group"><label class="form-label">Опубл.</label><input class="form-input" id="apPublish-videos" type="number" min="1" placeholder="10"></div>
+              </div>
+              <button class="btn btn-secondary btn-sm" style="width:100%" onclick="apSaveLoopSettings('videos')" id="apSave-videos">Сохранить</button>
+            </div>
+            <div class="form-section" id="apCycleSettings-clips">
+              <button class="btn btn-primary" style="width:100%;font-size:14px;padding:10px" onclick="apToggleLoop('clips')" id="apLoopBtn-clips">Цикл клипов</button>
+              <div class="grid-3" style="gap:6px;margin-top:8px">
+                <div class="form-group"><label class="form-label">Интервал</label><input class="form-input" id="apInterval-clips" type="number" min="1" placeholder="180"></div>
+                <div class="form-group"><label class="form-label">Скачать</label><input class="form-input" id="apDownload-clips" type="number" min="1" placeholder="10"></div>
+                <div class="form-group"><label class="form-label">Опубл.</label><input class="form-input" id="apPublish-clips" type="number" min="1" placeholder="10"></div>
+              </div>
+              <button class="btn btn-secondary btn-sm" style="width:100%" onclick="apSaveLoopSettings('clips')" id="apSave-clips">Сохранить</button>
+            </div>
+          </div>
           <div class="form-hint" id="gaStatusText" style="margin-top:6px;text-align:center">Автопилот готов.</div>
         </div>
 
@@ -128,16 +116,6 @@
           <div class="stat-card flat"><div class="stat-label">Ср. просмотры</div><div class="stat-value" id="dashGaViews">0</div><div class="stat-sub" id="dashGaLikes">лайки: 0</div></div>
           <div class="stat-card flat"><div class="stat-label">Очередь VK</div><div class="stat-value" id="dashGaQueue2">0</div><div class="stat-sub">отложенных</div></div>
           <div class="stat-card flat"><div class="stat-label">Цикл</div><div class="stat-value small" id="dashGaCycle">ожидание</div><div class="stat-sub" id="dashGaQueue">сегодня: 0</div></div>
-        </div>
-
-        <!-- Что бот поменял -->
-        <div style="padding:0 16px 12px">
-          <div onclick="toggleAccordion('gaBotChangesBody', this)" style="cursor:pointer;display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border);font-size:13px;font-weight:600;color:var(--muted)">
-            <span>Бот поменял автоматически</span><span class="accordion-chevron">▼</span>
-          </div>
-          <div id="gaBotChangesBody" style="display:none">
-            <div id="gaBotChangesList" class="form-section"><div class="form-hint">Ещё нет изменений — запусти цикл.</div></div>
-          </div>
         </div>
 
         <!-- Скрытые элементы для JS-совместимости -->
@@ -163,48 +141,6 @@
         </div>
       </div>
 
-    </section>
-
-    <section class="tab-content" id="monitor">
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">Мониторинг новостей</div>
-            <div class="settings-actions">
-              <button class="btn btn-primary btn-sm" onclick="post('/monitor/start', {}, 'Мониторинг запущен')">Старт</button>
-              <button class="btn btn-secondary btn-sm" onclick="post('/monitor/stop', {}, 'Мониторинг остановлен')">Стоп</button>
-              <button class="btn btn-ghost btn-sm" onclick="loadMonitor()">Обновить</button>
-            </div>
-          </div>
-          <div class="form-section">
-            <div id="monitorStatus"></div>
-            <div class="form-row-3">
-              <div class="form-group"><label class="form-label">Интервал, мин</label><input class="form-input" id="monInterval" type="number" min="1"></div>
-              <div class="form-group"><label class="form-label">Макс. за цикл</label><input class="form-input" id="monMaxCycle" type="number" min="1"></div>
-              <div class="form-group"><label class="form-label">Дней догонять</label><input class="form-input" id="monCatchDays" type="number" min="1"></div>
-            </div>
-            <div class="form-row">
-              <div class="form-group"><label class="form-label">Мин. просмотров</label><input class="form-input" id="monMinViews" type="number" min="0"></div>
-              <div class="form-group"><label class="form-label">&nbsp;</label><button class="btn btn-primary" onclick="saveMonitorSettings()">Сохранить мониторинг</button></div>
-            </div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><div class="card-title">Источники мониторинга</div></div>
-          <div class="form-section">
-            <div id="monitorSources"></div>
-            <div class="form-row">
-              <input class="form-input" id="monSourceName" placeholder="Название">
-              <input class="form-input" id="monSourceId" placeholder="VK community ID">
-            </div>
-            <button class="btn btn-primary" onclick="addMonitorSource()">Добавить источник</button>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="card-title">Лог мониторинга</div></div>
-        <div class="log-list" id="monitorLogList"></div>
-      </div>
     </section>
 
     <section class="tab-content" id="allstats">
@@ -261,7 +197,6 @@
           <button class="settings-tab" data-settings="publish">Публикация</button>
           <button class="settings-tab" data-settings="processing">Обработка</button>
           <button class="settings-tab" data-settings="filters">Фильтры</button>
-          <button class="settings-tab" data-settings="polls">Опросы</button>
           <button class="settings-tab" data-settings="antiplagiat">Водяной знак</button>
         </div>
 
@@ -316,12 +251,6 @@
           </div>
         </div>
 
-        <div class="settings-panel" id="settings-polls">
-          <div class="form-section">
-            <label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Опросы</span><span class="toggle-desc">Добавлять опрос к каждому N посту</span></span><span class="toggle"><input id="pollsEnabled" type="checkbox"><span class="toggle-slider"></span></span></label>
-            <div class="form-row-3"><div class="form-group"><label class="form-label">Частота</label><input class="form-input" id="pollFrequency" type="number" min="1"></div><label class="toggle-row compact-toggle"><span class="toggle-info"><span class="toggle-label">Анонимно</span></span><span class="toggle"><input id="pollAnonymous" type="checkbox"><span class="toggle-slider"></span></span></label><label class="toggle-row compact-toggle"><span class="toggle-info"><span class="toggle-label">Несколько ответов</span></span><span class="toggle"><input id="pollMultiple" type="checkbox"><span class="toggle-slider"></span></span></label></div>
-          </div>
-        </div>
         <div class="settings-panel" id="settings-antiplagiat">
           <div class="form-section">
             <div class="section-title">Водяной знак на фото</div>
@@ -376,23 +305,8 @@
       </div>
     </section>
 
-    <section class="tab-content" id="media">
-      <div class="grid-3" id="mediaCards"></div>
-      <div class="card">
-        <div class="card-header"><div class="card-title">Настройки медиа</div><button class="btn btn-primary btn-sm" onclick="saveMediaSettings()">Сохранить</button></div>
-        <div class="grid-3">
-          <div class="form-section"><div class="section-title">Фото</div><label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Включить фото</span></span><span class="toggle"><input id="photosEnabled" type="checkbox"><span class="toggle-slider"></span></span></label><div class="form-group"><label class="form-label">Фото за запуск</label><input class="form-input" id="photosPerRun" type="number"></div></div>
-          <div class="form-section"><div class="section-title">Видео</div><label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Пост на стену</span></span><span class="toggle"><input id="videosWallPost" type="checkbox"><span class="toggle-slider"></span></span></label><div class="form-group"><label class="form-label">Видео за запуск</label><input class="form-input" id="videosPerRun" type="number"></div><div class="form-group"><label class="form-label">Макс MB</label><input class="form-input" id="videosMaxMb" type="number"></div></div>
-          <div class="form-section"><div class="section-title">Клипы</div><label class="toggle-row"><span class="toggle-info"><span class="toggle-label">Пост на стену</span></span><span class="toggle"><input id="clipsWallPost" type="checkbox"><span class="toggle-slider"></span></span></label><div class="form-group"><label class="form-label">Клипов за запуск</label><input class="form-input" id="clipsPerRun" type="number"></div><div class="form-group"><label class="form-label">Макс секунд</label><input class="form-input" id="clipsMaxSec" type="number"></div></div>
-        </div>
-      </div>
-    </section>
-
     <section class="tab-content" id="library">
-      <div class="grid-2">
-        <div class="card"><div class="card-header"><div class="card-title">Библиотека контента</div><div style="display:flex;gap:8px"><button class="btn btn-secondary btn-sm" onclick="saveLibrarySettings()">Сохранить</button><button class="btn btn-ghost btn-sm" onclick="loadLibrary()">Обновить</button></div></div><div id="libraryControls" class="form-section"></div><div id="libraryBlock" style="margin-top:14px"></div></div>
-        <div class="card"><div class="card-header"><div class="card-title">Заготовки и опросы</div></div><div class="form-section"><textarea class="form-input" id="libraryEntryText" placeholder="Текст заготовки"></textarea><input class="form-input" id="libraryEntryTags" placeholder="#теги #через #пробел"><button class="btn btn-primary" onclick="addLibraryEntry()">Добавить заготовку</button><div class="divider"></div><input class="form-input" id="libraryPollQuestion" placeholder="Вопрос опроса"><input class="form-input" id="libraryPollAnswers" placeholder="Ответы через запятую"><button class="btn btn-secondary" onclick="addLibraryPoll()">Добавить опрос</button><button class="btn btn-danger" onclick="post('/library/reset', {}, 'Библиотека сброшена')">Сбросить библиотеку</button></div></div>
-      </div>
+      <div class="card"><div class="card-header"><div class="card-title">Библиотека контента</div><div style="display:flex;gap:8px"><button class="btn btn-secondary btn-sm" onclick="saveLibrarySettings()">Сохранить</button><button class="btn btn-ghost btn-sm" onclick="loadLibrary()">Обновить</button></div></div><div id="libraryControls" class="form-section"></div><div id="libraryBlock" style="margin-top:14px"></div></div>
     </section>
 
     <section class="tab-content" id="logs">
