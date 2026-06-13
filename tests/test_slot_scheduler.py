@@ -102,17 +102,18 @@ def test_record_slot_appears_in_future_reservations(scheduler_paths, monkeypatch
     assert abs(ts2 - fixed_ts) >= 1800
 
 
-def test_daily_limits_are_hardcoded_regardless_of_profile():
-    """Видео=1/день, клипы=2/день — жёстко в коде, конфиг не влияет."""
+def test_daily_limits_are_configurable_per_profile():
+    """videos_settings.daily_limit / clips_settings.daily_limit задают лимит,
+    с дефолтами 1 и 2, если в профиле не указано."""
     from services.slot_scheduler import _daily_limit
 
-    profile_tries_to_raise_limits = {
-        "videos_settings": {"daily_limit": 99},
-        "clips_settings": {"daily_limit": 99},
+    profile_with_custom_limits = {
+        "videos_settings": {"daily_limit": 5},
+        "clips_settings": {"daily_limit": 10},
     }
 
-    assert _daily_limit("videos", profile_tries_to_raise_limits) == 1
-    assert _daily_limit("clips", profile_tries_to_raise_limits) == 2
+    assert _daily_limit("videos", profile_with_custom_limits) == 5
+    assert _daily_limit("clips", profile_with_custom_limits) == 10
     assert _daily_limit("videos", {}) == 1
     assert _daily_limit("clips", {}) == 2
 

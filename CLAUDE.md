@@ -149,14 +149,16 @@ class AppState:
 
 ---
 
-## Checkpoint (2026-06-13 19:05)
+## Checkpoint (2026-06-13 21:55)
 
 **Slot scheduler + media quality (план `docs/superpowers/plans/2026-06-13-slot-scheduler-and-media-quality.md`, 16/16 задач):**
 - `services/slot_scheduler.py`: единый резерв слотов публикации для постов/
   фото/видео/клипов — `reserve_slot()`/`record_slot()`, `min_gap` между
-  любыми типами, дневные лимиты (видео=1, клипы=2/день, хардкод). Хранится в
-  `app_state.scheduled_slots_file`. Подключён во все 3 publish-воркера —
-  больше нет коллизий слотов и спама постов с интервалом 10-30 мин
+  любыми типами, дневные лимиты видео/клипов настраиваются через
+  `videos_settings.daily_limit` / `clips_settings.daily_limit` в config.json
+  (дефолты 1 и 2). Хранится в `app_state.scheduled_slots_file`. Подключён во
+  все 3 publish-воркера — больше нет коллизий слотов и спама постов с
+  интервалом 10-30 мин
 - pHash-дедуп (`services/phash.py`) включён для фото (был выключен по
   умолчанию) и расширен на видео/клипы (хэш кадров)
 - Engagement-фильтр отключён хардкодом в коде (не в config.json) — забираются

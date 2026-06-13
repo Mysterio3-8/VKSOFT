@@ -353,6 +353,7 @@ class AppState:
                 'quality': '720',
                 'create_wall_post': True,
                 'max_filesize_mb': 500,
+                'daily_limit': 1,
             },
             'clips_settings': {
                 'enabled': True,
@@ -367,6 +368,7 @@ class AppState:
                 'max_duration_sec': 180,
                 'quality': '720',
                 'create_wall_post': True,
+                'daily_limit': 2,
             },
             # Жёсткий антиплагиат для видео/клипов (ffmpeg). Пустые значения =
             # рандомизируются на каждый прогон, чтобы результат был разным.
