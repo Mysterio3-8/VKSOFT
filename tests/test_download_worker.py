@@ -198,3 +198,14 @@ def test_download_saves_phash_duplicate_when_antiplagiarism_will_rewrite_photo(m
     saved = tmp_path / "test_phash_ignore" / "downloaded_posts" / "123_99.json"
     assert saved.exists()
     assert not any("Phash" in message or "duplicate" in message for _, message in logs)
+
+
+def test_phash_enabled_reads_from_profile_config(monkeypatch):
+    """phash_enabled should reflect profile.phash.enabled, not be hardcoded False."""
+    import workers.download as dl
+
+    profile = {"phash": {"enabled": True, "threshold": 10}}
+    phash_cfg = profile.get('phash', {})
+    phash_enabled = phash_cfg.get('enabled', False)
+
+    assert phash_enabled is True

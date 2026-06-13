@@ -92,7 +92,7 @@ def _download_source(community_id: str, count: int):
 
     # в”Ђв”Ђ РџСѓРЅРєС‚ 6: phash РґРµРґСѓРїР»РёРєР°С†РёСЏ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
     phash_cfg = profile.get('phash', {})
-    phash_enabled = False
+    phash_enabled = bool(phash_cfg.get('enabled', False))
     phash_threshold = int(phash_cfg.get('threshold', 10))
 
     saved_offset = read_offsets().get(str(community_id), 0)
@@ -205,7 +205,10 @@ def _download_source(community_id: str, count: int):
                 continue
 
             # в”Ђв”Ђ РџСѓРЅРєС‚ 6: phash РґРµРґСѓРїР»РёРєР°С†РёСЏ в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
-            if phash_enabled and local_photos:
+            # РђРЅС‚РёРїР»Р°РіРёР°С‚ РёР·РјРµРЅРёС‚ С„РѕС‚Рѕ РїРµСЂРµРґ РїСѓР±Р»РёРєР°С†РёРµР№, РїРѕСЌС‚РѕРјСѓ СЃРѕРІРїР°РґРµРЅРёРµ
+            # РёСЃС…РѕРґРЅРѕРіРѕ С…СЌС€Р° РЅРµ Р·РЅР°С‡РёС‚ РІРёР·СѓР°Р»СЊРЅС‹Р№ РґСѓР±Р»РёРєР°С‚ РЅР° РІС‹С…РѕРґРµ
+            antiplagiaat_enabled = profile.get('antiplagiaat', {}).get('enabled', False)
+            if phash_enabled and local_photos and not antiplagiaat_enabled:
                 from services.phash import is_duplicate, add_to_cache
                 first_photo = Path(local_photos[0])
                 if is_duplicate(first_photo, phash_threshold):
