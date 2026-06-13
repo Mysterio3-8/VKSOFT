@@ -226,17 +226,23 @@ def download_photos_worker():
     profile = app_state.profile
     sources = [s for s in profile.get('sources', []) if s.get('enabled')]
     ph_cfg = profile.get('photos_settings', {})
-    count = int(ph_cfg.get('photos_per_run', 50))
+    count = int(ph_cfg.get('photos_download_per_run', ph_cfg.get('photos_per_run', 50)))
 
     if not sources:
         app_state.add_log('Фото: нет активных источников', 'warning')
         app_state.is_downloading_photos = False
         return
     try:
+        from services.seasonality import order_sources_by_season
+        from services.source_quality import is_source_blocked
+        sources = order_sources_by_season(sources)
         for src in sources:
             if not app_state.is_downloading_photos:
                 break
             cid = str(src.get('community_id', ''))
+            if is_source_blocked(cid):
+                app_state.add_log(f'Фото: источник {src.get("name", cid)} в стоп-листе — пропускаю', 'info')
+                continue
             app_state.add_log(f'Фото: источник {src.get("name", cid)}', 'info')
             _download_photos_source(cid, count)
     except Exception as e:
@@ -305,6 +311,14 @@ def publish_photos_worker(count: int):
                     meta_file.unlink(missing_ok=True)
                     continue
 
+                # Антиплагиат + вотермарка — единый пайплайн для любого медиа
+                try:
+                    from services.media_pipeline import process_photos
+                    if process_photos([str(photo_path)], profile):
+                        app_state.add_log(f'Фото: антиплагиат применён к {photo_path.name}', 'info')
+                except Exception as e:
+                    app_state.add_log(f'Фото: обработка {e}', 'warning')
+
                 att = _upload_to_album(vk_user, gid_num, album_id, photo_path)
                 if not att:
                     app_state.add_log('Фото: не загружено в альбом', 'error')
@@ -312,10 +326,10 @@ def publish_photos_worker(count: int):
                     continue
 
                 if create_wall:
-                    from services.content_library import compose_caption
+                    from services.content_library import compose_caption_with_meta
                     base_text = meta.get('text', '')
                     processing = profile.get('processing', {})
-                    text = compose_caption(
+                    text, caption_meta = compose_caption_with_meta(
                         base_text,
                         add_tags=True,
                         profile_tags=processing.get('hashtags', []),
@@ -332,7 +346,21 @@ def publish_photos_worker(count: int):
                         'attachments': att,
                         'publish_date': next_ts,
                     }
-                    vk_call_safe(vk_group.wall.post, **params)
+                    result = vk_call_safe(vk_group.wall.post, **params)
+                    vk_post_id = result.get('post_id') if isinstance(result, dict) else None
+                    if vk_post_id:
+                        try:
+                            from services.tracker import track as _track
+                            _track(
+                                vk_post_id, owner_id, str(meta.get('owner_id', '')),
+                                published_at=next_ts,
+                                caption_category=caption_meta.get('caption_category', ''),
+                                caption_text=caption_meta.get('caption_text', ''),
+                                caption_id=caption_meta.get('caption_id', ''),
+                                media_type='photo',
+                            )
+                        except Exception:
+                            pass
                     from datetime import datetime
                     app_state.add_log(
                         f'Фото: запланировано → {datetime.fromtimestamp(next_ts).strftime("%d.%m %H:%M")}',
@@ -374,20 +402,9 @@ def publish_photos_worker(count: int):
         app_state.is_publishing_photos = False
 
 
-def _get_next_ts(delay_min: int, delay_max: int) -> int:
-    from services.storage import read_last_scheduled
-    from vk.api import fetch_last_postponed_from_vk, get_vk_api
-    profile = app_state.profile
-    vk_cfg = profile.get('vk', {})
-    try:
-        vk_user = get_vk_api(vk_cfg.get('user_token', ''), vk_cfg.get('api_version', '5.131'))
-        owner_id = f'-{vk_cfg.get("group_id", "").lstrip("-")}'
-        vk_ts = fetch_last_postponed_from_vk(vk_user, owner_id)
-        file_ts = read_last_scheduled()
-        base = max(vk_ts or 0, file_ts or 0, int(time.time()))
-        return base + random.randint(delay_min, delay_max)
-    except Exception:
-        return int(time.time()) + random.randint(delay_min, delay_max)
+def _get_next_ts(delay_min: int, delay_max: int, media_type: str = 'photos') -> int:
+    from services.slot_scheduler import reserve_slot
+    return reserve_slot(media_type, delay_min, delay_max)
 
 
 def queue_count() -> int:
