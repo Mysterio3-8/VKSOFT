@@ -331,6 +331,13 @@ def publish_worker(count: int):
                             'message': f'РћРїСѓР±Р»РёРєРѕРІР°РЅРѕ {published}, РѕС€РёР±РѕРє {failed}',
                         })
                         app_state.bump_daily_stat('errors')
+                        from services.publish_log import log_publish_event
+                        log_publish_event(
+                            media_type='posts',
+                            status='failed',
+                            source_id=str(post.get('owner_id', '')),
+                            extra={'reason': 'photos_upload_failed'},
+                        )
                         continue
 
                 # Р’РёРґРµРѕ вЂ” РїСЂРёРєСЂРµРїР»СЏРµРј РїРѕ VK ID Р±РµР· РїРѕРІС‚РѕСЂРЅРѕР№ Р·Р°РіСЂСѓР·РєРё
@@ -400,6 +407,14 @@ def publish_worker(count: int):
                 if result and isinstance(result, dict):
                     vk_post_id = result.get('post_id')
                     if vk_post_id:
+                        from services.publish_log import log_publish_event
+                        log_publish_event(
+                            media_type='posts',
+                            status='success',
+                            post_id=vk_post_id,
+                            publish_date=params.get('publish_date'),
+                            source_id=str(post.get('owner_id', '')),
+                        )
                         try:
                             from services.growth_autopilot import mark_used_post, source_post_key
                             source_id = str(post.get('owner_id') or post_file.stem.split('_')[0]).lstrip('-')

@@ -309,6 +309,8 @@ def publish_photos_worker(count: int):
                 if not photo_path.exists():
                     app_state.add_log(f'Фото файл не найден: {photo_path.name}', 'warning')
                     meta_file.unlink(missing_ok=True)
+                    from services.publish_log import log_publish_event
+                    log_publish_event(media_type='photos', status='failed', extra={'reason': 'file_not_found'})
                     continue
 
                 # Антиплагиат + вотермарка — единый пайплайн для любого медиа
@@ -323,6 +325,8 @@ def publish_photos_worker(count: int):
                 if not att:
                     app_state.add_log('Фото: не загружено в альбом', 'error')
                     failed += 1
+                    from services.publish_log import log_publish_event
+                    log_publish_event(media_type='photos', status='failed', extra={'reason': 'upload_failed'})
                     continue
 
                 if create_wall:
@@ -348,6 +352,13 @@ def publish_photos_worker(count: int):
                     }
                     result = vk_call_safe(vk_group.wall.post, **params)
                     vk_post_id = result.get('post_id') if isinstance(result, dict) else None
+                    from services.publish_log import log_publish_event
+                    log_publish_event(
+                        media_type='photos',
+                        status='success',
+                        post_id=vk_post_id,
+                        publish_date=next_ts,
+                    )
                     if vk_post_id:
                         try:
                             from services.tracker import track as _track

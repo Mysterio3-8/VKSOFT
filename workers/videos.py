@@ -373,6 +373,8 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                 if not vid_id:
                     app_state.add_log(f'{label}: загрузка не удалась', 'error')
                     failed += 1
+                    from services.publish_log import log_publish_event
+                    log_publish_event(media_type=media_type, status='failed', extra={'reason': 'upload_failed'})
                     continue
 
                 att = f'video{vid_owner}_{vid_id}'
@@ -400,6 +402,13 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                     }
                     result = vk_call_safe(vk_group.wall.post, **params)
                     vk_post_id = result.get('post_id') if isinstance(result, dict) else None
+                    from services.publish_log import log_publish_event
+                    log_publish_event(
+                        media_type=media_type,
+                        status='success',
+                        post_id=vk_post_id,
+                        publish_date=next_ts,
+                    )
                     if vk_post_id:
                         try:
                             from services.tracker import track as _track
