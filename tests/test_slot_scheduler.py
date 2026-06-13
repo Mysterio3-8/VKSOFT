@@ -75,3 +75,17 @@ def test_reserve_slot_does_not_limit_other_media_types(scheduler_paths, monkeypa
 
     from datetime import datetime
     assert datetime.fromtimestamp(ts_clip).date() == datetime.fromtimestamp(ts_video).date()
+
+
+def test_app_state_has_scheduled_slots_file(monkeypatch, tmp_path):
+    from config import app_state, STORAGE_DIR
+
+    expected = STORAGE_DIR / app_state.active_profile_id / 'scheduled_slots.json'
+    assert app_state.scheduled_slots_file == expected
+
+
+def test_app_state_has_publish_log_file():
+    from config import app_state, STORAGE_DIR
+
+    expected = STORAGE_DIR / app_state.active_profile_id / 'publish_log.jsonl'
+    assert app_state.publish_log_file == expected

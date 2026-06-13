@@ -62,6 +62,9 @@ class AppState:
         self.is_publishing_videos  = False
         self.is_downloading_clips  = False
         self.is_publishing_clips   = False
+        # Циклы автопилота по типам медиа (посты/фото/видео/клипы)
+        self.media_loops: Dict = {'posts': False, 'photos': False, 'videos': False, 'clips': False}
+        self.media_loop_state: Dict = {}
         self._monitor_thread: Optional[threading.Thread] = None
         self._autopilot_thread: Optional[threading.Thread] = None
         self.autopilot_last_report: Dict = {}
@@ -168,6 +171,14 @@ class AppState:
         p.mkdir(parents=True, exist_ok=True)
         return p
 
+    @property
+    def scheduled_slots_file(self) -> Path:
+        return STORAGE_DIR / self.active_profile_id / 'scheduled_slots.json'
+
+    @property
+    def publish_log_file(self) -> Path:
+        return STORAGE_DIR / self.active_profile_id / 'publish_log.jsonl'
+
     # ── config ───────────────────────────────────────────────
 
     @staticmethod
@@ -185,15 +196,19 @@ class AppState:
             'sources': [],
             'download_settings': {
                 'posts_to_download': 100,
-                'delay_min': 2,
-                'delay_max': 5,
-                'check_duplicates': False,
+                'delay_min': 0,
+                'delay_max': 0,
+                'check_duplicates': True,
+                'batch_size': 100,
+                'max_scan_posts': 400,
+                'max_photos_per_post': 2,
             },
             'publishing_settings': {
-                'posts_to_publish': 50,
+                'posts_to_publish': 100,
                 'publish_delay_min': 7200,
                 'publish_delay_max': 10800,
                 'postponed_enabled': True,
+                'skip_vk_sync': True,
                 'publish_hours_enabled': True,
                 'publish_hours_start': 8,
                 'publish_hours_end': 22,
@@ -316,6 +331,8 @@ class AppState:
             'photos_settings': {
                 'enabled': True,
                 'photos_per_run': 50,
+                'photos_download_per_run': 50,
+                'photos_publish_per_run': 50,
                 'publish_delay_min': 7200,
                 'publish_delay_max': 10800,
                 'delay_min': 3,
@@ -327,6 +344,8 @@ class AppState:
                 'enabled': True,
                 'autopilot': True,         # участвует ли видео в автопилоте
                 'videos_per_run': 10,
+                'videos_download_per_run': 10,
+                'videos_publish_per_run': 10,
                 'publish_delay_min': 10800,
                 'publish_delay_max': 21600,
                 'delay_min': 3,
@@ -339,6 +358,8 @@ class AppState:
                 'enabled': True,
                 'autopilot': True,         # участвуют ли клипы в автопилоте
                 'clips_per_run': 10,
+                'clips_download_per_run': 10,
+                'clips_publish_per_run': 10,
                 'publish_delay_min': 10800,
                 'publish_delay_max': 21600,
                 'delay_min': 3,
@@ -405,6 +426,17 @@ class AppState:
         return result
 
     @staticmethod
+    def _enforce_fast_post_cycle(profile: Dict) -> Dict:
+        download = profile.setdefault('download_settings', {})
+        download['check_duplicates'] = True
+        download['delay_min'] = 0
+        download['delay_max'] = 0
+        download['batch_size'] = 100
+        download['max_photos_per_post'] = 2
+        profile.setdefault('publishing_settings', {})['skip_vk_sync'] = True
+        return profile
+
+    @staticmethod
     def _looks_mojibake(value: str) -> bool:
         return isinstance(value, str) and any(marker in value for marker in MOJIBAKE_MARKERS)
 
@@ -447,6 +479,7 @@ class AppState:
             )
             merged['id'] = pid
             merged.setdefault('vk', {})['api_version'] = '5.131'
+            self._enforce_fast_post_cycle(merged)
             for legacy_external_model_key in ('ol' + 'lama', 'ge' + 'mini'):
                 merged.pop(legacy_external_model_key, None)
             profiles[pid] = merged

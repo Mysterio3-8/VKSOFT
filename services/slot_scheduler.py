@@ -19,13 +19,11 @@ _DEFAULT_MIN_GAP_SECONDS = 1800  # 30 минут между любыми дву�
 
 
 def _slots_file() -> Path:
-    from config import STORAGE_DIR
-    return STORAGE_DIR / app_state.active_profile_id / 'scheduled_slots.json'
+    return app_state.scheduled_slots_file
 
 
 def _lock_file() -> Path:
-    from config import STORAGE_DIR
-    return STORAGE_DIR / app_state.active_profile_id / 'scheduled_slots.lock'
+    return app_state.scheduled_slots_file.with_suffix('.lock')
 
 
 def _acquire_lock(timeout: float = 10.0) -> Optional[object]:
