@@ -66,3 +66,11 @@ def test_rotate_old_logs_compresses_yesterdays_file(monkeypatch, tmp_path):
     with gzip.open(gz_files[0], "rt", encoding="utf-8") as f:
         assert '"post_id": 1' in f.read()
     assert not log_file.exists()
+
+
+def test_media_loop_worker_calls_rotate_old_logs(monkeypatch):
+    import inspect
+    import workers.media_autopilot as ma
+
+    source = inspect.getsource(ma.media_loop_worker)
+    assert "rotate_old_logs" in source

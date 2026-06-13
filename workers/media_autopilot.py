@@ -223,6 +223,12 @@ def media_loop_worker(media_type: str) -> None:
             except Exception as e:
                 app_state.add_log(f'Автопилот ({label}): ошибка прохода: {e}', 'error')
 
+            try:
+                from services.publish_log import rotate_old_logs
+                rotate_old_logs()
+            except Exception:
+                pass
+
             if not app_state.media_loops.get(media_type):
                 break
             interval_sec = loop_interval_min(media_type) * 60
