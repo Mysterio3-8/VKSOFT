@@ -1,12 +1,102 @@
 # -*- coding: utf-8 -*-
 
-from workers.download import download_batch_size, download_scan_limit, select_photos_for_download
+from config import AppState
+from workers.download import (
+    download_batch_size,
+    download_scan_limit,
+    per_source_download_count,
+    select_photos_for_download,
+)
+
+
+def test_default_profile_always_enables_duplicate_checking():
+    profile = AppState.default_profile()
+
+    assert profile["download_settings"]["check_duplicates"] is True
+
+
+def test_normalized_profile_forces_fast_duplicate_safe_post_cycle():
+    state = object.__new__(AppState)
+
+    normalized = state._normalize_config({
+        "active_profile": "p1",
+        "profiles": {
+            "p1": {
+                "download_settings": {
+                    "check_duplicates": False,
+                    "delay_min": 5,
+                    "delay_max": 9,
+                    "batch_size": 10,
+                    "max_photos_per_post": 8,
+                },
+                "publishing_settings": {
+                    "skip_vk_sync": False,
+                },
+            }
+        },
+    })
+
+    profile = normalized["profiles"]["p1"]
+    assert profile["download_settings"]["check_duplicates"] is True
+    assert profile["download_settings"]["delay_min"] == 0
+    assert profile["download_settings"]["delay_max"] == 0
+    assert profile["download_settings"]["batch_size"] == 100
+    assert profile["download_settings"]["max_photos_per_post"] == 2
+    assert profile["publishing_settings"]["skip_vk_sync"] is True
 
 
 def test_download_batch_keeps_large_vk_scan_when_only_one_post_left():
     cfg = {"batch_size": 100}
 
     assert download_batch_size(remaining=1, dl_cfg=cfg) == 100
+
+
+def test_per_source_download_count_distributes_total_cycle_budget():
+    assert per_source_download_count(total_count=100, source_count=5) == 20
+    assert per_source_download_count(total_count=100, source_count=3) == 34
+    assert per_source_download_count(total_count=100, source_count=0) == 100
+
+
+def test_download_all_worker_reassigns_budget_when_source_returns_less(monkeypatch, tmp_path):
+    import config
+    from config import app_state
+    import workers.download as download
+
+    monkeypatch.setattr(config, "STORAGE_DIR", tmp_path)
+    monkeypatch.setattr(
+        app_state,
+        "config",
+        {
+            "active_profile": "budget",
+            "profiles": {
+                "budget": {
+                    "sources": [
+                        {"community_id": "1", "enabled": True},
+                        {"community_id": "2", "enabled": True},
+                        {"community_id": "3", "enabled": True},
+                    ],
+                    "download_settings": {"posts_to_download": 100},
+                }
+            },
+        },
+    )
+    app_state.is_downloading = True
+    monkeypatch.setattr(app_state, "add_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr("services.seasonality.order_sources_by_season", lambda sources: sources)
+    monkeypatch.setattr("services.source_quality.is_source_blocked", lambda cid: False)
+
+    requested = []
+    returned = iter([5, 48, 47])
+
+    def fake_download_source(cid, count):
+        requested.append((cid, count))
+        return next(returned)
+
+    monkeypatch.setattr(download, "_download_source", fake_download_source)
+
+    download.download_all_worker()
+
+    assert requested == [("1", 34), ("2", 48), ("3", 47)]
 
 
 def test_download_batch_respects_config_bounds():

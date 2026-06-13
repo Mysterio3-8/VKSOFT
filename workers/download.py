@@ -34,6 +34,12 @@ def download_scan_limit(target_count: int, dl_cfg: Dict) -> int:
     return max(100, int(target_count) * multiplier)
 
 
+def per_source_download_count(total_count: int, source_count: int) -> int:
+    if source_count <= 0:
+        return max(1, int(total_count))
+    return max(1, int((int(total_count) + source_count - 1) / source_count))
+
+
 def select_photos_for_download(photos: list, profile: Dict, dl_cfg: Dict) -> list:
     if not photos:
         return []
@@ -48,6 +54,14 @@ def select_photos_for_download(photos: list, profile: Dict, dl_cfg: Dict) -> lis
     return photos
 
 
+def _is_used_post(post: Dict, community_id: str) -> bool:
+    try:
+        from services.growth_autopilot import load_used_posts, source_post_key
+        return source_post_key(post, str(community_id)) in load_used_posts()
+    except Exception:
+        return False
+
+
 def _download_source(community_id: str, count: int):
     """Core download logic вЂ” caller manages is_downloading flag."""
     profile = app_state.profile
@@ -58,7 +72,7 @@ def _download_source(community_id: str, count: int):
 
     if not user_token:
         app_state.add_log('РћС€РёР±РєР°: VK User Token РЅРµ Р·Р°РґР°РЅ', 'error')
-        return
+        return 0
 
     vk = get_vk_api(user_token, api_ver)
     owner_id = normalize_owner_id(community_id)
@@ -66,7 +80,7 @@ def _download_source(community_id: str, count: int):
     delay_max = float(dl_cfg.get('delay_max', 3))
     if delay_min > delay_max:
         delay_min, delay_max = delay_max, delay_min
-    check_dup = dl_cfg.get('check_duplicates', False)
+    check_dup = True
 
     allow_video = profile.get('processing', {}).get('allow_video', False)
 
@@ -173,7 +187,8 @@ def _download_source(community_id: str, count: int):
                     continue
 
             fname = app_state.posts_dir / f'{community_id}_{post_id}.json'
-            if check_dup and fname.exists():
+            if check_dup and (fname.exists() or _is_used_post(post, str(community_id))):
+                skipped += 1
                 skip_reasons['duplicate'] += 1
                 continue
 
@@ -273,6 +288,7 @@ def _download_source(community_id: str, count: int):
     )
 
     app_state.add_log(f'[{owner_id}] Р“РѕС‚РѕРІРѕ: {downloaded} СЃРєР°С‡Р°РЅРѕ, {skipped} РїСЂРѕРїСѓС‰РµРЅРѕ', 'info')
+    return downloaded
 
 
 def download_worker(community_id: str, count: int):
@@ -291,7 +307,7 @@ def download_all_worker():
         app_state.add_log('РќРµС‚ Р°РєС‚РёРІРЅС‹С… РёСЃС‚РѕС‡РЅРёРєРѕРІ', 'warning')
         app_state.is_downloading = False
         return
-    count = profile.get('download_settings', {}).get('posts_to_download', 100)
+    count = int(profile.get('download_settings', {}).get('posts_to_download', 100))
     app_state.download_progress = {
         'phase': 'download',
         'current': 0,
@@ -300,18 +316,34 @@ def download_all_worker():
         'message': 'РџР°РєРµС‚РЅР°СЏ Р·Р°РіСЂСѓР·РєР° Р·Р°РїСѓС‰РµРЅР°',
         'cancelled': False,
     }
-    app_state.add_log(f'РџР°РєРµС‚РЅР°СЏ Р·Р°РіСЂСѓР·РєР°: {len(sources)} РёСЃС‚РѕС‡РЅРёРєРѕРІ Г— {count}', 'info')
+    app_state.add_log(f'РџР°РєРµС‚РЅР°СЏ Р·Р°РіСЂСѓР·РєР°: {count} РІСЃРµРіРѕ, {len(sources)} РёСЃС‚РѕС‡РЅРёРєРѕРІ', 'info')
     try:
-        for i, src in enumerate(sources, 1):
+        from services.seasonality import order_sources_by_season
+        from services.source_quality import is_source_blocked
+        sources = order_sources_by_season(sources)
+        eligible_sources = [
+            src for src in sources
+            if not is_source_blocked(str(src.get('community_id', '')))
+        ]
+        blocked_count = len(sources) - len(eligible_sources)
+        if blocked_count:
+            app_state.add_log(f'РџР°РєРµС‚РЅР°СЏ Р·Р°РіСЂСѓР·РєР°: РїСЂРѕРїСѓС‰РµРЅРѕ СЃС‚РѕРї-РёСЃС‚РѕС‡РЅРёРєРѕРІ {blocked_count}', 'info')
+        remaining = count
+        for i, src in enumerate(eligible_sources, 1):
             if not app_state.is_downloading:
                 break
+            if remaining <= 0:
+                break
             cid = str(src.get('community_id', ''))
+            sources_left = len(eligible_sources) - i + 1
+            per_source_count = per_source_download_count(remaining, sources_left)
             app_state.download_progress.update({
                 'source': src.get('name', cid),
-                'message': f'РСЃС‚РѕС‡РЅРёРє {i}/{len(sources)}',
+                'message': f'РСЃС‚РѕС‡РЅРёРє {i}/{len(eligible_sources)}',
             })
-            app_state.add_log(f'РСЃС‚РѕС‡РЅРёРє {i}/{len(sources)}: {src.get("name", cid)}', 'info')
-            _download_source(cid, count)
+            app_state.add_log(f'РСЃС‚РѕС‡РЅРёРє {i}/{len(eligible_sources)}: {src.get("name", cid)} РґРѕ {per_source_count}', 'info')
+            downloaded = int(_download_source(cid, per_source_count) or 0)
+            remaining = max(0, remaining - downloaded)
         total = len(list(app_state.posts_dir.glob('*.json')))
         app_state.add_log(f'Р’СЃРµ РёСЃС‚РѕС‡РЅРёРєРё РѕР±СЂР°Р±РѕС‚Р°РЅС‹. Р’ РѕС‡РµСЂРµРґРё: {total}', 'info')
     except Exception as e:
@@ -356,66 +388,8 @@ def download_then_publish_worker():
         if not app_state.is_downloading and not app_state.is_publishing:
             app_state.download_progress['phase'] = 'idle'
 
-    # Видео и клипы — отдельным этапом после фото (если включены в профиле)
-    try:
-        run_media_autopilot()
-    except Exception as e:
-        app_state.add_log(f'Автопилот медиа (видео/клипы): {e}', 'error')
-
-
-def run_media_autopilot():
-    """Скачать + обработать + опубликовать видео и клипы по настройкам профиля.
-
-    Каждый тип включается отдельным флагом profile['videos_settings']['autopilot']
-    и profile['clips_settings']['autopilot']. Антиплагиат/лого применяются внутри
-    publish_videos_worker через services.video_transform.
-    """
-    profile = app_state.profile
-    vid_cfg = profile.get('videos_settings', {})
-    clip_cfg = profile.get('clips_settings', {})
-
-    # Проверяем рекомендацию learning engine: если конкуренты показывают
-    # высокий ER у видео — скачиваем их топ видео дополнительно.
-    try:
-        from services.learning import get_learning_state
-        learning = get_learning_state(app_state.active_profile_id)
-        prefer_video = learning.get('prefer_video', False)
-        prefer_clips = learning.get('prefer_multi_photo', False)  # multi_photo → нет смысла, смотрим video
-    except Exception:
-        prefer_video = prefer_clips = False
-
-    if vid_cfg.get('autopilot', False):
-        from workers.videos import download_videos_worker, publish_videos_worker, download_top_competitor_videos
-        app_state.add_log('Автопилот: этап видео', 'info')
-        app_state.is_downloading_videos = True
-        download_videos_worker()
-        # Если learning рекомендует видео — доливаем топ конкурентов
-        if prefer_video:
-            app_state.add_log('Learning: видео в топе у конкурентов, качаю их топ', 'info')
-            download_top_competitor_videos(count=3, is_clips_mode=False)
-        pending = len(list(app_state.videos_queue_dir.glob('*.json')))
-        if pending > 0:
-            app_state.is_publishing_videos = True
-            publish_videos_worker(int(vid_cfg.get('videos_per_run', 10)), is_clips_mode=False)
-        else:
-            app_state.add_log('Автопилот видео: очередь пуста', 'info')
-
-    if clip_cfg.get('autopilot', False):
-        from workers.clips import download_clips_worker
-        from workers.videos import publish_videos_worker, download_top_competitor_videos
-        app_state.add_log('Автопилот: этап клипов', 'info')
-        app_state.is_downloading_clips = True
-        download_clips_worker()
-        # Если learning рекомендует видео — доливаем топ клипов конкурентов
-        if prefer_video:
-            app_state.add_log('Learning: клипы качаю у топ конкурентов', 'info')
-            download_top_competitor_videos(count=3, is_clips_mode=True)
-        pending = len(list(app_state.clips_queue_dir.glob('*.json')))
-        if pending > 0:
-            app_state.is_publishing_clips = True
-            publish_videos_worker(int(clip_cfg.get('clips_per_run', 10)), is_clips_mode=True)
-        else:
-            app_state.add_log('Автопилот клипов: очередь пуста', 'info')
+    # Видео и клипы больше не цепляются к циклу постов — у каждого типа
+    # медиа свой цикл автопилота (workers/media_autopilot.py)
 
 
 def random_delay(min_s: float, max_s: float):
