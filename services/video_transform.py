@@ -347,7 +347,7 @@ def transform_from_profile(video_path: str | Path, profile: dict, *,
         return random.uniform(lo, hi) if hard else fallback
 
     transforms = {
-        'crop_percent': _auto('crop_percent', 0.04, 0.08, 0.03) if ap_on else 0.0,
+        'crop_percent': _auto('crop_percent', 0.01, 0.03, 0.02) if ap_on else 0.0,
         'color_shift': bool(vt_cfg.get('color_shift', ap_on)),
         'brightness': random.uniform(-0.04, 0.06),
         'contrast': random.uniform(1.02, 1.08),
@@ -392,14 +392,14 @@ def transform_from_profile(video_path: str | Path, profile: dict, *,
             else:
                 aspect_mode = random.choices(
                     ['original', 'square_blur', 'square_crop'],
-                    weights=[0.45, 0.35, 0.20],
+                    weights=[0.65, 0.25, 0.10],
                 )[0]
 
         fade_cfg = vt_cfg.get('fade')
-        do_fade = fade_cfg if isinstance(fade_cfg, bool) else (random.random() < 0.5)
+        do_fade = fade_cfg if isinstance(fade_cfg, bool) else (random.random() < 0.2)
 
         frame_px = int(vt_cfg.get('frame_px', 0) or 0)
-        if frame_px == 0 and hard and random.random() < 0.3:
+        if frame_px == 0 and hard and random.random() < 0.1:
             frame_px = random.randint(6, 14)
 
         fin = apply_finishing(

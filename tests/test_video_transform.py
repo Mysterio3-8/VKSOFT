@@ -131,3 +131,68 @@ def test_transform_from_profile_runs_with_antiplagiat(tmp_path):
 
 def test_transform_missing_file_returns_false(tmp_path):
     assert transform_video(tmp_path / 'nope.mp4', {'crop_percent': 0.05}) is False
+
+
+def test_auto_crop_percent_range_is_softer(monkeypatch, tmp_path):
+    """User feedback: crop was too aggressive and degraded quality —
+    reduce the auto-random crop range from 4-8% to 1-3%."""
+    import random
+    from services import video_transform
+
+    src = tmp_path / 'v.mp4'
+    src.write_bytes(b'fake')
+
+    profile = {
+        'antiplagiaat': {'enabled': True},
+        'video_transform': {'hard_mode': True, 'crop_percent': 0.0},
+        'watermark': {},
+    }
+
+    captured = {}
+
+    def fake_transform_video(video_path, transforms, **kwargs):
+        captured['crop_percent'] = transforms['crop_percent']
+        return True
+
+    monkeypatch.setattr(video_transform, 'transform_video', fake_transform_video)
+    monkeypatch.setattr(video_transform, 'apply_finishing', lambda *a, **k: False)
+
+    random.seed(1)
+    for _ in range(50):
+        video_transform.transform_from_profile(src, profile, is_clip=False)
+        assert 0.01 <= captured['crop_percent'] <= 0.03
+
+
+def test_fade_probability_reduced(monkeypatch, tmp_path):
+    """User feedback: fade was too aggressive (appeared too often).
+    Reduce random fade probability from 50% to 20%."""
+    import random
+    from services import video_transform
+
+    src = tmp_path / 'v.mp4'
+    src.write_bytes(b'fake')
+
+    profile = {
+        'antiplagiaat': {'enabled': True},
+        'video_transform': {'hard_mode': True},
+        'watermark': {},
+    }
+
+    captured_fades = []
+
+    def fake_transform_video(video_path, transforms, **kwargs):
+        return True
+
+    def fake_apply_finishing(video_path, **kwargs):
+        captured_fades.append(kwargs['fade'])
+        return False
+
+    monkeypatch.setattr(video_transform, 'transform_video', fake_transform_video)
+    monkeypatch.setattr(video_transform, 'apply_finishing', fake_apply_finishing)
+
+    random.seed(42)
+    for _ in range(200):
+        video_transform.transform_from_profile(src, profile, is_clip=False)
+
+    fade_rate = sum(captured_fades) / len(captured_fades)
+    assert fade_rate < 0.3, f"fade rate {fade_rate} too high, expected ~0.2"
