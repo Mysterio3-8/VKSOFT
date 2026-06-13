@@ -75,6 +75,20 @@ def _set_state(media_type: str, **kwargs) -> None:
     app_state.media_loop_state.setdefault(media_type, {}).update(kwargs)
 
 
+def _set_progress(media_type: str, *, phase: str, current: int, total: int, label: str = '') -> None:
+    """Обновить прогресс текущего прохода цикла.
+
+    phase: 'download' | 'publish' | 'idle'.
+    total=0 — фронт скрывает числа/проценты, показывает '—'.
+    """
+    _set_state(media_type, progress={
+        'phase': phase,
+        'current': current,
+        'total': total,
+        'label': label,
+    })
+
+
 def _cycle_posts() -> None:
     from workers.download import download_all_worker
     from workers.publish import publish_worker

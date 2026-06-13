@@ -149,7 +149,7 @@ class AppState:
 
 ---
 
-## Checkpoint (2026-06-13 21:55)
+## Checkpoint (2026-06-13 23:26)
 
 **Slot scheduler + media quality (план `docs/superpowers/plans/2026-06-13-slot-scheduler-and-media-quality.md`, 16/16 задач):**
 - `services/slot_scheduler.py`: единый резерв слотов публикации для постов/
