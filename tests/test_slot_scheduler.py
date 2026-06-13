@@ -37,3 +37,41 @@ def test_reserve_slot_persists_to_file(scheduler_paths):
     data = json.loads(slots_file.read_text(encoding="utf-8"))
     assert len(data["slots"]) == 1
     assert data["slots"][0]["media_type"] == "photos"
+
+
+def test_reserve_slot_avoids_collision_with_other_media_type(scheduler_paths, monkeypatch):
+    from services.slot_scheduler import reserve_slot
+    monkeypatch.setattr("services.slot_scheduler._min_gap_seconds", lambda profile: 1800)
+
+    ts1 = reserve_slot(media_type="videos", delay_min=10, delay_max=10, profile={})
+    ts2 = reserve_slot(media_type="clips", delay_min=10, delay_max=10, profile={})
+
+    assert abs(ts2 - ts1) >= 1800
+
+
+def test_reserve_slot_respects_daily_limit(scheduler_paths, monkeypatch):
+    from services.slot_scheduler import reserve_slot
+    monkeypatch.setattr("services.slot_scheduler._min_gap_seconds", lambda profile: 60)
+
+    profile = {"videos_settings": {"daily_limit": 1}}
+
+    ts1 = reserve_slot(media_type="videos", delay_min=10, delay_max=10, profile=profile)
+    ts2 = reserve_slot(media_type="videos", delay_min=10, delay_max=10, profile=profile)
+
+    from datetime import datetime
+    day1 = datetime.fromtimestamp(ts1).date()
+    day2 = datetime.fromtimestamp(ts2).date()
+    assert day2 > day1
+
+
+def test_reserve_slot_does_not_limit_other_media_types(scheduler_paths, monkeypatch):
+    from services.slot_scheduler import reserve_slot
+    monkeypatch.setattr("services.slot_scheduler._min_gap_seconds", lambda profile: 60)
+
+    profile = {"videos_settings": {"daily_limit": 1}}
+
+    ts_video = reserve_slot(media_type="videos", delay_min=10, delay_max=10, profile=profile)
+    ts_clip = reserve_slot(media_type="clips", delay_min=10, delay_max=10, profile=profile)
+
+    from datetime import datetime
+    assert datetime.fromtimestamp(ts_clip).date() == datetime.fromtimestamp(ts_video).date()
