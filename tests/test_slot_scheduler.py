@@ -100,3 +100,45 @@ def test_record_slot_appears_in_future_reservations(scheduler_paths, monkeypatch
 
     ts2 = reserve_slot(media_type="videos", delay_min=10, delay_max=10, profile={})
     assert abs(ts2 - fixed_ts) >= 1800
+
+
+def test_daily_limits_are_hardcoded_regardless_of_profile():
+    """Видео=1/день, клипы=2/день — жёстко в коде, конфиг не влияет."""
+    from services.slot_scheduler import _daily_limit
+
+    profile_tries_to_raise_limits = {
+        "videos_settings": {"daily_limit": 99},
+        "clips_settings": {"daily_limit": 99},
+    }
+
+    assert _daily_limit("videos", profile_tries_to_raise_limits) == 1
+    assert _daily_limit("clips", profile_tries_to_raise_limits) == 2
+    assert _daily_limit("videos", {}) == 1
+    assert _daily_limit("clips", {}) == 2
+
+
+def test_reserve_slot_caps_videos_to_one_per_day(scheduler_paths, monkeypatch):
+    from services.slot_scheduler import reserve_slot
+    monkeypatch.setattr("services.slot_scheduler._min_gap_seconds", lambda profile: 60)
+
+    ts1 = reserve_slot(media_type="videos", delay_min=10, delay_max=10, profile={})
+    ts2 = reserve_slot(media_type="videos", delay_min=10, delay_max=10, profile={})
+
+    from datetime import datetime
+    assert datetime.fromtimestamp(ts1).date() != datetime.fromtimestamp(ts2).date()
+
+
+def test_reserve_slot_caps_clips_to_two_per_day(scheduler_paths, monkeypatch):
+    from services.slot_scheduler import reserve_slot
+    monkeypatch.setattr("services.slot_scheduler._min_gap_seconds", lambda profile: 60)
+
+    ts1 = reserve_slot(media_type="clips", delay_min=10, delay_max=10, profile={})
+    ts2 = reserve_slot(media_type="clips", delay_min=10, delay_max=10, profile={})
+    ts3 = reserve_slot(media_type="clips", delay_min=10, delay_max=10, profile={})
+
+    from datetime import datetime
+    day1 = datetime.fromtimestamp(ts1).date()
+    day2 = datetime.fromtimestamp(ts2).date()
+    day3 = datetime.fromtimestamp(ts3).date()
+    assert day1 == day2
+    assert day3 != day1

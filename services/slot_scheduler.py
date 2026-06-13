@@ -95,12 +95,19 @@ def _min_gap_seconds(profile: dict) -> int:
         return _DEFAULT_MIN_GAP_SECONDS
 
 
+# Жёсткие лимиты на видео/клипы — намеренно в коде, не в конфиге
+# (пользователь решил не выносить в настройки, чтобы нельзя было
+# случайно ослабить через UI).
+_VIDEOS_DAILY_LIMIT = 1
+_CLIPS_DAILY_LIMIT = 2
+
+
 def _daily_limit(media_type: str, profile: dict) -> Optional[int]:
     """Дневной лимит для типа медиа. None = без лимита."""
     if media_type == 'videos':
-        return int(profile.get('videos_settings', {}).get('daily_limit', 0)) or None
+        return _VIDEOS_DAILY_LIMIT
     if media_type == 'clips':
-        return int(profile.get('clips_settings', {}).get('daily_limit', 0)) or None
+        return _CLIPS_DAILY_LIMIT
     if media_type in ('posts', 'photos'):
         limit = int(profile.get('publishing_settings', {}).get('max_posts_per_day', 0))
         return limit or None
