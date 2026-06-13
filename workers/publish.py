@@ -284,6 +284,8 @@ def publish_worker(count: int):
         published = failed = 0
         _poll_counter = 0
 
+        from workers.media_autopilot import _set_progress
+
         publish_started_at = time.time()
         for index, post_file in enumerate(post_files, 1):
             if not app_state.is_publishing:
@@ -296,6 +298,7 @@ def publish_worker(count: int):
                     'total': len(post_files),
                     'message': f'РџСѓР±Р»РёРєР°С†РёСЏ {index} РёР· {len(post_files)}',
                 })
+                _set_progress('posts', phase='publish', current=index - 1, total=len(post_files), label=f'Публикация {index} из {len(post_files)}')
                 post = json.loads(post_file.read_text(encoding='utf-8'))
                 text, caption_meta = _compose_publish_text(post, profile, app_state.active_profile_id)
 
@@ -534,6 +537,8 @@ def publish_worker(count: int):
                     'message': f'РћРїСѓР±Р»РёРєРѕРІР°РЅРѕ {published}, РѕС€РёР±РѕРє {failed}',
                 })
                 app_state.bump_daily_stat('errors')
+
+        _set_progress('posts', phase='publish', current=published + failed, total=len(post_files), label=f'Опубликовано {published}, ошибок {failed}')
 
         result_msg = f'РџСѓР±Р»РёРєР°С†РёСЏ Р·Р°РІРµСЂС€РµРЅР°: {published} Р·Р°РїР»Р°РЅРёСЂРѕРІР°РЅРѕ, {failed} РѕС€РёР±РѕРє'
         app_state.add_log(f'publish done: scheduled {published}, errors {failed}, total {max(1, int(time.time() - publish_started_at))}s', 'info')
