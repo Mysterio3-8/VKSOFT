@@ -22,7 +22,7 @@
 | `docs/PROJECT_DOCUMENTATION.md` | Полная техническая документация: все API роутеры, services, workers, тесты |
 | `docs/РУКОВОДСТВО_ПОЛЬЗОВАТЕЛЯ.md` | Нетехническое руководство для владельца канала |
 | `.claude/rules/bot-invariants.md` | Архитектурные инварианты для Python-кода (слои, AppState, логирование) |
-| `.claude/commands/` | Слэш-команды: `/build`, `/state`, `/cleanup`, `/test-tokens`, `/start`, `/logs` |
+| `.claude/commands/` | Слэш-команды: `/build`, `/state`, `/cleanup`, `/test-tokens`, `/start`, `/logs`, `/commit`, `/deploy` |
 
 ---
 
