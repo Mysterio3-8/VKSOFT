@@ -151,6 +151,9 @@ def _download_photos_source(community_id: str, count: int):
 
     app_state.add_log(f'Фото: загрузка {count} из {owner_id}', 'info')
 
+    from workers.media_autopilot import _set_progress
+    _set_progress('photos', phase='download', current=0, total=count, label=f'Загрузка из {owner_id}')
+
     while downloaded < count and app_state.is_downloading_photos:
         try:
             resp = vk_call_safe(
@@ -210,6 +213,7 @@ def _download_photos_source(community_id: str, count: int):
             _add_seen(key)
 
             downloaded += 1
+            _set_progress('photos', phase='download', current=downloaded, total=count, label=f'Скачано {downloaded} из {count}')
             if downloaded % 10 == 0 or downloaded == 1:
                 app_state.add_log(f'Фото [{owner_id}] {downloaded}/{count}', 'info')
 
@@ -295,13 +299,16 @@ def publish_photos_worker(count: int):
             return
 
         app_state.add_log(f'Фото: публикация {len(queue)} фото', 'info')
+        from workers.media_autopilot import _set_progress
+        _set_progress('photos', phase='publish', current=0, total=len(queue), label=f'Публикация 0 из {len(queue)}')
         published = failed = 0
         from services.storage import read_last_scheduled, write_last_scheduled
         next_ts = _get_next_ts(delay_min, delay_max)
 
-        for meta_file in queue:
+        for index, meta_file in enumerate(queue, 1):
             if not app_state.is_publishing_photos:
                 break
+            _set_progress('photos', phase='publish', current=index - 1, total=len(queue), label=f'Публикация {index} из {len(queue)}')
             try:
                 meta = json.loads(meta_file.read_text(encoding='utf-8'))
                 photo_path = Path(meta.get('_local_file', ''))
@@ -396,6 +403,7 @@ def publish_photos_worker(count: int):
                 app_state.add_log(f'Фото пост ошибка: {e}', 'error')
                 failed += 1
 
+        _set_progress('photos', phase='publish', current=published + failed, total=len(queue), label=f'Опубликовано {published}, ошибок {failed}')
         app_state.add_log(f'Фото: {published} опубликовано, {failed} ошибок', 'info')
         if published > 0 and profile.get('storage_cleanup', {}).get('clean_orphans_after_run', True):
             try:
