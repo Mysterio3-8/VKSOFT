@@ -176,3 +176,17 @@ def reserve_slot(
         return candidate
     finally:
         _release_lock(lock)
+
+
+def record_slot(media_type: str, ts: int) -> None:
+    """Зарегистрировать уже выбранный timestamp (posts со своим умным
+    расписанием) в общем реестре, чтобы photos/videos/clips не коллидировали
+    с ним через min_gap.
+    """
+    lock = _acquire_lock()
+    try:
+        data = _prune_old_slots(_load_slots())
+        data['slots'].append({'media_type': media_type, 'ts': int(ts)})
+        _save_slots(data)
+    finally:
+        _release_lock(lock)

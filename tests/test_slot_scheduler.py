@@ -89,3 +89,14 @@ def test_app_state_has_publish_log_file():
 
     expected = STORAGE_DIR / app_state.active_profile_id / 'publish_log.jsonl'
     assert app_state.publish_log_file == expected
+
+
+def test_record_slot_appears_in_future_reservations(scheduler_paths, monkeypatch):
+    from services.slot_scheduler import record_slot, reserve_slot
+    monkeypatch.setattr("services.slot_scheduler._min_gap_seconds", lambda profile: 1800)
+
+    fixed_ts = int(time.time()) + 100
+    record_slot("posts", fixed_ts)
+
+    ts2 = reserve_slot(media_type="videos", delay_min=10, delay_max=10, profile={})
+    assert abs(ts2 - fixed_ts) >= 1800

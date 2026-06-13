@@ -53,7 +53,8 @@ def _upload_local_photos_with_fallback(vk_user, gid_num: int, selected_photos: l
     return attachments
 
 
-def _compose_publish_text(post: dict, profile: dict, profile_id: str) -> str:
+def _compose_publish_text(post: dict, profile: dict, profile_id: str) -> tuple[str, dict]:
+    """Вернуть (текст поста, мета выбранной подписи) — мета уходит в трекер."""
     processing = profile.get('processing', {})
     ap_cfg = profile.get('antiplagiaat', {})
 
@@ -63,16 +64,16 @@ def _compose_publish_text(post: dict, profile: dict, profile_id: str) -> str:
     if ap_cfg.get('enabled') and ap_cfg.get('clear_text', True):
         text = ''
 
-    from services.content_library import compose_caption, get_active_promo_message
+    from services.content_library import compose_caption_with_meta, get_active_promo_message
     from services.learning import get_smart_hashtags
 
     # Promo-сообщение заменяет весь текст поста если включено
     promo = get_active_promo_message(profile_id)
     if promo:
-        return promo
+        return promo, {'caption_category': 'promo', 'caption_text': ''}
 
     smart_tags = get_smart_hashtags(profile_id)
-    return compose_caption(
+    return compose_caption_with_meta(
         text,
         add_tags=True,
         profile_tags=processing.get('hashtags', []),
@@ -114,21 +115,12 @@ def _prepare_local_photos_for_publish(local_photos: list, profile: dict, log) ->
         if local_photos:
             log('РђРЅС‚РёРїР»Р°РіРёР°С‚: С„РѕС‚Рѕ РїРµСЂРµРјРµС€Р°РЅС‹', 'info')
 
-    if ap_cfg.get('enabled') and local_photos:
-        from services.photo_transform import apply_transforms_from_profile
-        tr_ok = apply_transforms_from_profile(local_photos, profile)
+    # Антиплагиат + вотермарка — единый пайплайн для любого медиа
+    if local_photos:
+        from services.media_pipeline import process_photos
+        tr_ok = process_photos(local_photos, profile)
         if tr_ok:
-            log(f'РђРЅС‚РёРїР»Р°РіРёР°С‚ С‚СЂР°РЅСЃС„РѕСЂРјР°С†РёРё: {tr_ok} С„РѕС‚Рѕ', 'info')
-
-    wm_cfg = profile.get('watermark', {})
-    if wm_cfg.get('enabled') and local_photos:
-        from services.watermark import apply_watermark_from_profile
-        wm_ok = 0
-        for pp_str in local_photos:
-            if apply_watermark_from_profile(pp_str, profile):
-                wm_ok += 1
-        if wm_ok:
-            log(f'Р’РѕРґСЏРЅРѕР№ Р·РЅР°Рє: {wm_ok} С„РѕС‚Рѕ', 'info')
+            log(f'Антиплагиат+вотермарка: {tr_ok} фото', 'info')
 
     return local_photos, all_local_photos
 
@@ -305,7 +297,7 @@ def publish_worker(count: int):
                     'message': f'РџСѓР±Р»РёРєР°С†РёСЏ {index} РёР· {len(post_files)}',
                 })
                 post = json.loads(post_file.read_text(encoding='utf-8'))
-                text = _compose_publish_text(post, profile, app_state.active_profile_id)
+                text, caption_meta = _compose_publish_text(post, profile, app_state.active_profile_id)
 
                 # Upload photos
                 attachments = []
@@ -399,6 +391,9 @@ def publish_worker(count: int):
                     params['publish_date'] = next_ts
                     scheduled_label = datetime.fromtimestamp(next_ts).strftime('%d.%m %H:%M')
 
+                    from services.slot_scheduler import record_slot
+                    record_slot('posts', next_ts)
+
                 result = vk_call_safe(vk.wall.post, **params)
 
                 # ── Пункт 7: трекинг поста ────────────────────────────────
@@ -406,9 +401,29 @@ def publish_worker(count: int):
                     vk_post_id = result.get('post_id')
                     if vk_post_id:
                         try:
+                            from services.growth_autopilot import mark_used_post, source_post_key
+                            source_id = str(post.get('owner_id') or post_file.stem.split('_')[0]).lstrip('-')
+                            mark_used_post(
+                                {
+                                    'dedup_key': source_post_key(post, source_id),
+                                    'source_id': source_id,
+                                    'post_id': post.get('id') or post.get('post_id'),
+                                },
+                                profile_id=app_state.active_profile_id,
+                            )
+                        except Exception:
+                            pass
+                        try:
                             from services.tracker import track as _track
                             source_cid = post.get('owner_id', '')
-                            _track(vk_post_id, owner_id, str(source_cid), published_at=params.get('publish_date'))
+                            _track(
+                                vk_post_id, owner_id, str(source_cid),
+                                published_at=params.get('publish_date'),
+                                caption_category=caption_meta.get('caption_category', ''),
+                                caption_text=caption_meta.get('caption_text', ''),
+                                caption_id=caption_meta.get('caption_id', ''),
+                                media_type='photo',
+                            )
                         except Exception:
                             pass
                         # Записать для engagement-обучения
