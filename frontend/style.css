@@ -414,6 +414,82 @@ body {
 .ga-schedule-item:last-child { border-bottom: 0; }
 .compact-toggle { padding: 0; align-self: end; min-height: 37px; }
 
+/* ── Карточки циклов автопилота ── */
+.ap-cycle {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ap-cycle:hover { border-color: var(--border-dark); box-shadow: var(--shadow); }
+
+.ap-cycle-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ap-cycle-icon {
+  width: 30px; height: 30px; flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent-light);
+  color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.ap-cycle-icon svg { width: 16px; height: 16px; }
+.ap-cycle-title {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ap-status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--border-dark);
+  flex-shrink: 0;
+  transition: background .2s;
+}
+.ap-status-dot.running {
+  background: var(--success);
+  animation: pulse 2s infinite;
+}
+.ap-status-dot.sleeping { background: var(--warning); }
+
+.ap-cycle-status-row {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 16px;
+}
+
+.ap-progress { display: flex; flex-direction: column; gap: 4px; }
+.ap-progress-track {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  height: 6px;
+  overflow: hidden;
+}
+.ap-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  width: 0;
+  transition: width .3s ease;
+}
+.ap-progress-fill.idle { background: var(--border-dark); }
+.ap-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.ap-cycle-settings { gap: 6px; }
+.ap-cycle-actions { display: flex; flex-direction: column; gap: 6px; }
+
 .form-input {
   background: var(--surface); border: 1px solid var(--border-dark);
   border-radius: var(--radius-sm); padding: 8px 10px;
