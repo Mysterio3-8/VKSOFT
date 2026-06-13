@@ -18,7 +18,7 @@ except ImportError:
     _PIL_OK = False
 
 
-def apply_random_crop(image_path: str | Path, min_pct: float = 0.02, max_pct: float = 0.05) -> bool:
+def apply_random_crop(image_path: str | Path, min_pct: float = 0.01, max_pct: float = 0.025) -> bool:
     """Обрезать случайный процент с каждого края (асимметрично)."""
     if not _PIL_OK:
         return False

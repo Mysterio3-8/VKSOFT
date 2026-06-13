@@ -151,3 +151,14 @@ def test_strip_metadata_changes_file_hash():
         original_hash = _file_hash(p)
         assert strip_metadata(p) is True
         assert _file_hash(p) != original_hash
+
+
+def test_apply_random_crop_default_range_is_softer(tmp_path):
+    """User feedback: photo crop was too aggressive — reduce default
+    range from 2-5% to 1-2.5% so subjects aren't cut off."""
+    import inspect
+    from services.photo_transform import apply_random_crop
+
+    sig = inspect.signature(apply_random_crop)
+    assert sig.parameters['min_pct'].default == 0.01
+    assert sig.parameters['max_pct'].default == 0.025
