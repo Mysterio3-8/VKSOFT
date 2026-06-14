@@ -176,6 +176,7 @@ function _pollCycleStatus() {
 
 const AP_LOOP_LABELS = { posts: 'постов', photos: 'фото', videos: 'видео', clips: 'клипов' };
 const AP_PHASE_LABELS = { working: 'работает', sleeping: 'ждёт', stopped: 'остановлен' };
+const AP_PROGRESS_PHASE_LABELS = { download: 'Скачивание', publish: 'Публикация', idle: '' };
 
 async function apToggleLoop(type) {
   const btn = $(`apLoopBtn-${type}`);
@@ -187,6 +188,17 @@ async function apToggleLoop(type) {
   }).catch(error => ({ status: 'error', message: error.message }));
   notify(message(data, 'Готово'), data.status === 'ok' ? 'success' : 'error');
   await apRefreshLoops();
+}
+
+function formatApStatus(type, st) {
+  if (!st.running) return 'Остановлен';
+  const phase = AP_PHASE_LABELS[st.phase] || st.phase || 'работает';
+  const progress = st.progress || {};
+  const progressLabel = AP_PROGRESS_PHASE_LABELS[progress.phase];
+  const parts = [phase];
+  if (progressLabel) parts.push(progressLabel);
+  if (st.next_run) parts.push(`след. ${st.next_run}`);
+  return parts.join(' · ');
 }
 
 async function apRefreshLoops() {
@@ -208,6 +220,30 @@ async function apRefreshLoops() {
     apFillLoopInput(`apInterval-${type}`, st.interval_min || 180);
     apFillLoopInput(`apDownload-${type}`, st.download_count || 1);
     apFillLoopInput(`apPublish-${type}`, st.publish_count || 1);
+
+    const dot = $(`apStatusDot-${type}`);
+    if (dot) {
+      dot.classList.toggle('running', !!st.running && st.phase === 'working');
+      dot.classList.toggle('sleeping', !!st.running && st.phase === 'sleeping');
+    }
+
+    const statusEl = $(`apStatusText-${type}`);
+    if (statusEl) statusEl.textContent = formatApStatus(type, st);
+
+    const progress = st.progress || {};
+    const total = progress.total || 0;
+    const current = progress.current || 0;
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+
+    const fill = $(`apProgressFill-${type}`);
+    const label = $(`apProgressLabel-${type}`);
+    const pctEl = $(`apProgressPct-${type}`);
+    if (fill) {
+      fill.style.width = total > 0 ? `${pct}%` : '0%';
+      fill.classList.toggle('idle', total === 0);
+    }
+    if (label) label.textContent = total > 0 ? `${current} из ${total}` : '—';
+    if (pctEl) pctEl.textContent = total > 0 ? `${pct}%` : '—';
   }
   const statusEl = $('gaStatusText');
   if (statusEl) statusEl.textContent = active.length ? `Работают: ${active.join(' · ')}` : 'Автопилот готов.';
