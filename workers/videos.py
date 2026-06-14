@@ -155,6 +155,9 @@ def _download_videos_source(community_id: str, count: int,
     label = 'Клипы' if is_clips_mode else 'Видео'
 
     app_state.add_log(f'{label}: загрузка {count} из {owner_id}', 'info')
+    from workers.media_autopilot import _set_progress
+    progress_type = 'clips' if is_clips_mode else 'videos'
+    _set_progress(progress_type, phase='download', current=0, total=count, label=f'Загрузка из {owner_id}')
 
     while downloaded < count and getattr(app_state, flag):
         try:
@@ -244,6 +247,7 @@ def _download_videos_source(community_id: str, count: int,
                 _add_seen(key)
 
             downloaded += 1
+            _set_progress(progress_type, phase='download', current=downloaded, total=count, label=f'Скачано {downloaded} из {count}')
             if downloaded % 5 == 0 or downloaded == 1:
                 app_state.add_log(f'{label} [{owner_id}] {downloaded}/{count}', 'info')
 
@@ -326,12 +330,15 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
             return
 
         app_state.add_log(f'{label}: публикация {len(queue)}', 'info')
+        from workers.media_autopilot import _set_progress
         published = failed = 0
         media_type = 'clips' if is_clips_mode else 'videos'
+        _set_progress(media_type, phase='publish', current=0, total=len(queue), label=f'Публикация 0 из {len(queue)}')
 
-        for meta_file in queue:
+        for index, meta_file in enumerate(queue, 1):
             if not getattr(app_state, flag):
                 break
+            _set_progress(media_type, phase='publish', current=index - 1, total=len(queue), label=f'Публикация {index} из {len(queue)}')
             try:
                 meta = json.loads(meta_file.read_text(encoding='utf-8'))
                 video_path = Path(meta.get('_local_file', ''))
@@ -445,6 +452,7 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                 app_state.add_log(f'{label} ошибка поста: {e}', 'error')
                 failed += 1
 
+        _set_progress(media_type, phase='publish', current=published + failed, total=len(queue), label=f'Опубликовано {published}, ошибок {failed}')
         app_state.add_log(f'{label}: {published} опубликовано, {failed} ошибок', 'info')
         if published > 0 and profile.get('storage_cleanup', {}).get('clean_orphans_after_run', True):
             try:
