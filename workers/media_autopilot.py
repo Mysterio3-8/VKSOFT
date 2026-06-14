@@ -237,6 +237,7 @@ def media_loop_worker(media_type: str) -> None:
                 _CYCLES[media_type]()
             except Exception as e:
                 app_state.add_log(f'Автопилот ({label}): ошибка прохода: {e}', 'error')
+                _set_progress(media_type, phase='idle', current=0, total=0)
 
             try:
                 from services.publish_log import rotate_old_logs
