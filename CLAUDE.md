@@ -149,7 +149,48 @@ class AppState:
 
 ---
 
-## Checkpoint (2026-06-14 11:45)
+## Checkpoint (2026-06-14 12:00)
+
+**Редизайн фронтенда + прогресс-бары автопилота (план
+`docs/superpowers/plans/2026-06-13-design-overhaul-and-autopilot-progress.md`,
+11/11 задач + 1 фикс), смержено в `main`:**
+- Новая светлая терракотовая палитра (Anthropic-light) — CSS-токены
+  (`--accent: #d97757`, `--bg: #faf8f6` и т.д.) применены на всех страницах
+  (дашборд, каналы, настройки, библиотека, все каналы, логи, ниши), старые
+  фиолетовые цвета заменены
+- 4 карточки автопилота (Посты/Фото/Видео/Клипы) на дашборде — новый
+  компонент `.ap-cycle*`: статус-точка (работает/спит/остановлен),
+  статус-текст с фазой, прогресс-бар с заливкой/% /лейблом "X из Y"
+- `_set_progress(media_type, *, phase, current, total, label='')` в
+  `workers/media_autopilot.py` пишет прогресс в
+  `app_state.media_loop_state[type]['progress']`; вызывается из
+  `download.py`, `photos.py`, `publish.py`, `videos.py` на каждом шаге
+  скачивания/публикации для всех 4 типов медиа. Сброс в idle (`total=0`) в
+  начале каждого прохода **и при ошибке прохода** (фикс после финального
+  review — иначе бар "застывал" с надписью "Скачивание" при статусе "ждёт")
+- `frontend/js/autopilot.js`: `apRefreshLoops()` читает `st.progress` и
+  обновляет `#apProgressFill/Label/Pct-{type}` + `#apStatusDot/Text-{type}`
+  через новый `formatApStatus()`
+- Все существующие id/обработчики (`apLoopBtn-*`, `apInterval-*` и т.д.)
+  не тронуты — старый функционал кнопок/настроек работает как прежде
+- Удалён мёртвый файл `frontend/_mockup_autopilot.html`
+
+**Полный набор тестов: 130 passed** (`pytest tests/ -q --ignore=tests/test_playwright_ui.py`),
+проверено в браузере (Playwright): idle-состояние и симулированные
+динамические прогресс-бары (35%/100%/30%) — рендерятся корректно, 0 ошибок
+в консоли. Финальный code-review: APPROVED WITH MINOR NOTES (0
+critical/high).
+
+**Следующий шаг:**
+- Понаблюдать за реальной работой прогресс-баров на проде (когда автопилот
+  скачивает/публикует) — динамика проверена только через мок `api()`, не
+  на живых данных VK
+- `main` сейчас на 24 коммита впереди `origin/main` — пуш на GitHub не
+  делался в этой сессии
+
+---
+
+## Checkpoint (2026-06-14 11:45) — предыдущий
 
 **Slot scheduler + media quality (план `docs/superpowers/plans/2026-06-13-slot-scheduler-and-media-quality.md`, 16/16 задач):**
 - `services/slot_scheduler.py`: единый резерв слотов публикации для постов/
