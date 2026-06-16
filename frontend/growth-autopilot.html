@@ -84,11 +84,6 @@
         <div class="stat-value" id="scheduledCount">0</div>
         <div class="stat-sub">предпросмотр</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Очередь</div>
-        <div class="stat-value" id="queueCountGa">0</div>
-        <div class="stat-sub">локальных файлов</div>
-      </div>
     </section>
 
     <section class="card" style="margin-top:16px">
@@ -151,7 +146,6 @@ function renderReport(report) {
   const summary = report.summary || {};
   document.getElementById('candidateCount').textContent = summary.candidate_count || 0;
   document.getElementById('scheduledCount').textContent = summary.scheduled_preview || 0;
-  document.getElementById('queueCountGa').textContent = summary.queue_files || 0;
   document.getElementById('statusText').textContent = report.generated_at ? `Отчет: ${report.generated_at}` : '';
 
   const checks = report.checks || [];

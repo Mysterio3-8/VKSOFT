@@ -9,7 +9,6 @@ def test_media_loop_counts_use_separate_download_and_publish_settings(monkeypatc
         'photos_settings': {'photos_download_per_run': 12, 'photos_publish_per_run': 7},
         'videos_settings': {'videos_download_per_run': 8, 'videos_publish_per_run': 3},
         'clips_settings': {'clips_download_per_run': 6, 'clips_publish_per_run': 2},
-        'autopilot': {'intervals': {'posts': 11, 'photos': 12, 'videos': 13, 'clips': 14}},
     }
     monkeypatch.setitem(app_state.config, 'active_profile', 'test')
     monkeypatch.setitem(app_state.config, 'profiles', {'test': profile})
@@ -26,4 +25,3 @@ def test_media_loop_counts_use_separate_download_and_publish_settings(monkeypatc
     status = loops_status()
     assert status['posts']['download_count'] == 42
     assert status['posts']['publish_count'] == 24
-    assert status['clips']['interval_min'] == 14

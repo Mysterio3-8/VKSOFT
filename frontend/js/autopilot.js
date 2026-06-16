@@ -175,7 +175,7 @@ function _pollCycleStatus() {
 // ── Циклы автопилота по типам медиа ──────────────────────────────
 
 const AP_LOOP_LABELS = { posts: 'постов', photos: 'фото', videos: 'видео', clips: 'клипов' };
-const AP_PHASE_LABELS = { working: 'работает', sleeping: 'ждёт', stopped: 'остановлен' };
+const AP_PHASE_LABELS = { working: 'работает', stopped: 'остановлен' };
 const AP_PROGRESS_PHASE_LABELS = { download: 'Скачивание', publish: 'Публикация', idle: '' };
 
 async function apToggleLoop(type) {
@@ -197,7 +197,6 @@ function formatApStatus(type, st) {
   const progressLabel = AP_PROGRESS_PHASE_LABELS[progress.phase];
   const parts = [phase];
   if (progressLabel) parts.push(progressLabel);
-  if (st.next_run) parts.push(`след. ${st.next_run}`);
   return parts.join(' · ');
 }
 
@@ -215,17 +214,13 @@ async function apRefreshLoops() {
     }
     if (st.running) {
       const phase = AP_PHASE_LABELS[st.phase] || st.phase || 'работает';
-      active.push(`${AP_LOOP_LABELS[type]}: ${phase}${st.next_run ? ` (след. ${st.next_run})` : ''}`);
+      active.push(`${AP_LOOP_LABELS[type]}: ${phase}`);
     }
-    apFillLoopInput(`apInterval-${type}`, st.interval_min || 180);
     apFillLoopInput(`apDownload-${type}`, st.download_count || 1);
     apFillLoopInput(`apPublish-${type}`, st.publish_count || 1);
 
     const dot = $(`apStatusDot-${type}`);
-    if (dot) {
-      dot.classList.toggle('running', !!st.running && st.phase === 'working');
-      dot.classList.toggle('sleeping', !!st.running && st.phase === 'sleeping');
-    }
+    if (dot) dot.classList.toggle('running', !!st.running && st.phase === 'working');
 
     const statusEl = $(`apStatusText-${type}`);
     if (statusEl) statusEl.textContent = formatApStatus(type, st);
@@ -257,10 +252,9 @@ function apFillLoopInput(id, value) {
 }
 
 function apLoopSettingsPatch(type) {
-  const interval = num(`apInterval-${type}`) || 1;
   const downloadCount = num(`apDownload-${type}`) || 1;
   const publishCount = num(`apPublish-${type}`) || 1;
-  const patch = { autopilot: { intervals: { [type]: interval } } };
+  const patch = {};
   if (type === 'posts') {
     patch.download_settings = { posts_to_download: downloadCount };
     patch.publishing_settings = { posts_to_publish: publishCount };

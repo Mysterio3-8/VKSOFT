@@ -214,6 +214,8 @@ class AppState:
                 'publish_hours_end': 22,
                 'timezone': 'Europe/Moscow',
                 'max_posts_per_day': 4,
+                'max_total_per_day': 0,        # 0 = без общего потолка по всем типам
+                'apply_window_to_media': False,  # окно publish_hours и для медиа-циклов
                 'smart_schedule_enabled': True,
             },
             'processing': {
@@ -326,7 +328,6 @@ class AppState:
             },
             'tracking': {
                 'enabled': True,
-                'alert_low_views': False,
             },
             'photos_settings': {
                 'enabled': True,

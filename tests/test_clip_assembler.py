@@ -11,7 +11,7 @@ from services.clip_assembler import (
 
 
 def test_overlay_families_match_report_spec():
-    assert set(OVERLAY_FAMILIES) == {'curiosity', 'escape', 'scale', 'rating'}
+    assert set(OVERLAY_FAMILIES) == {'curiosity', 'escape', 'scale', 'rating', 'manifest'}
     for family, hooks in OVERLAY_FAMILIES.items():
         assert hooks, family
         for hook in hooks:

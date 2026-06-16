@@ -129,6 +129,78 @@ def test_reserve_slot_caps_videos_to_one_per_day(scheduler_paths, monkeypatch):
     assert datetime.fromtimestamp(ts1).date() != datetime.fromtimestamp(ts2).date()
 
 
+def test_apply_publish_window_disabled_by_default():
+    from datetime import datetime
+
+    from services.slot_scheduler import _apply_publish_window
+
+    night = int(datetime.now().replace(hour=3, minute=0, second=0, microsecond=0).timestamp())
+    assert _apply_publish_window(night, {}) == night
+
+
+def test_apply_publish_window_pushes_night_into_daytime():
+    from datetime import datetime
+
+    from services.slot_scheduler import _apply_publish_window
+
+    profile = {'publishing_settings': {
+        'apply_window_to_media': True,
+        'publish_hours_enabled': True,
+        'publish_hours_start': 8,
+        'publish_hours_end': 22,
+    }}
+    night = int(datetime.now().replace(hour=3, minute=0, second=0, microsecond=0).timestamp())
+
+    out = _apply_publish_window(night, profile)
+
+    assert 8 <= datetime.fromtimestamp(out).hour < 22
+
+
+def test_reserve_slot_global_cap_across_all_types(scheduler_paths, monkeypatch):
+    from datetime import datetime
+
+    from services.slot_scheduler import reserve_slot
+    monkeypatch.setattr("services.slot_scheduler._min_gap_seconds", lambda profile: 60)
+
+    profile = {"publishing_settings": {"max_total_per_day": 2}}
+
+    ts1 = reserve_slot(media_type="photos", delay_min=10, delay_max=10, profile=profile)
+    ts2 = reserve_slot(media_type="clips", delay_min=10, delay_max=10, profile=profile)
+    ts3 = reserve_slot(media_type="photos", delay_min=10, delay_max=10, profile=profile)
+
+    d1 = datetime.fromtimestamp(ts1).date()
+    d2 = datetime.fromtimestamp(ts2).date()
+    d3 = datetime.fromtimestamp(ts3).date()
+    assert d1 == d2
+    assert d3 != d1
+
+
+def test_daily_limit_photos_default_and_custom():
+    """У фото свой дневной лимит (дефолт 1), отдельный от постов."""
+    from services.slot_scheduler import _daily_limit
+
+    assert _daily_limit("photos", {}) == 1
+    assert _daily_limit("photos", {"photos_settings": {"daily_limit": 3}}) == 3
+
+
+def test_daily_limit_posts_independent_of_photos():
+    from services.slot_scheduler import _daily_limit
+
+    assert _daily_limit("posts", {}) is None
+    assert _daily_limit("posts", {"publishing_settings": {"max_posts_per_day": 3}}) == 3
+
+
+def test_reserve_slot_caps_photos_to_one_per_day(scheduler_paths, monkeypatch):
+    from services.slot_scheduler import reserve_slot
+    monkeypatch.setattr("services.slot_scheduler._min_gap_seconds", lambda profile: 60)
+
+    ts1 = reserve_slot(media_type="photos", delay_min=10, delay_max=10, profile={})
+    ts2 = reserve_slot(media_type="photos", delay_min=10, delay_max=10, profile={})
+
+    from datetime import datetime
+    assert datetime.fromtimestamp(ts1).date() != datetime.fromtimestamp(ts2).date()
+
+
 def test_reserve_slot_caps_clips_to_two_per_day(scheduler_paths, monkeypatch):
     from services.slot_scheduler import reserve_slot
     monkeypatch.setattr("services.slot_scheduler._min_gap_seconds", lambda profile: 60)

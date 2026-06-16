@@ -224,31 +224,40 @@ def _download_photos_source(community_id: str, count: int):
             break
 
     app_state.add_log(f'Фото [{owner_id}]: {downloaded} скачано, {skipped} пропущено', 'info')
+    return downloaded
 
 
 def download_photos_worker():
     profile = app_state.profile
-    sources = [s for s in profile.get('sources', []) if s.get('enabled')]
+    sources = profile.get('sources', [])
     ph_cfg = profile.get('photos_settings', {})
     count = int(ph_cfg.get('photos_download_per_run', ph_cfg.get('photos_per_run', 50)))
 
-    if not sources:
+    enabled_count = sum(1 for s in sources if s.get('enabled'))
+    if not enabled_count:
         app_state.add_log('Фото: нет активных источников', 'warning')
         app_state.is_downloading_photos = False
         return
     try:
-        from services.seasonality import order_sources_by_season
-        from services.source_quality import is_source_blocked
-        sources = order_sources_by_season(sources)
-        for src in sources:
-            if not app_state.is_downloading_photos:
+        from workers.download import eligible_sources_in_season, per_source_download_count
+        eligible = eligible_sources_in_season(sources)
+        if not eligible:
+            app_state.add_log('Фото: все источники в стоп-листе', 'warning')
+            return
+        blocked = enabled_count - len(eligible)
+        if blocked:
+            app_state.add_log(f'Фото: пропущено стоп-источников {blocked}', 'info')
+        total = len(eligible)
+        remaining = count
+        for i, src in enumerate(eligible, 1):
+            if not app_state.is_downloading_photos or remaining <= 0:
                 break
             cid = str(src.get('community_id', ''))
-            if is_source_blocked(cid):
-                app_state.add_log(f'Фото: источник {src.get("name", cid)} в стоп-листе — пропускаю', 'info')
-                continue
-            app_state.add_log(f'Фото: источник {src.get("name", cid)}', 'info')
-            _download_photos_source(cid, count)
+            name = src.get('name', cid)
+            per = per_source_download_count(remaining, total - i + 1)
+            app_state.add_log(f'Фото: канал {i}/{total} «{name}» — беру до {per}', 'info')
+            got = int(_download_photos_source(cid, per) or 0)
+            remaining = max(0, remaining - got)
     except Exception as e:
         app_state.add_log(f'Фото загрузка: {e}', 'error')
     finally:
@@ -302,8 +311,6 @@ def publish_photos_worker(count: int):
         from workers.media_autopilot import _set_progress
         _set_progress('photos', phase='publish', current=0, total=len(queue), label=f'Публикация 0 из {len(queue)}')
         published = failed = 0
-        from services.storage import read_last_scheduled, write_last_scheduled
-        next_ts = _get_next_ts(delay_min, delay_max)
 
         for index, meta_file in enumerate(queue, 1):
             if not app_state.is_publishing_photos:
@@ -347,9 +354,11 @@ def publish_photos_worker(count: int):
                         add_profile_tags=processing.get('add_hashtags') or not base_text,
                     )
 
-                    now = int(time.time())
-                    if next_ts <= now:
-                        next_ts = now + random.randint(delay_min, delay_max)
+                    # Каждое фото получает свой слот через единый планировщик:
+                    # он соблюдает дневной лимит фото и зазор от любых других
+                    # публикаций. Раньше время накручивалось вручную в обход
+                    # лимита — пачка фото уходила за один день (спам).
+                    next_ts = _get_next_ts(delay_min, delay_max)
 
                     params = {
                         'owner_id': owner_id,
@@ -384,8 +393,6 @@ def publish_photos_worker(count: int):
                         f'Фото: запланировано → {datetime.fromtimestamp(next_ts).strftime("%d.%m %H:%M")}',
                         'info'
                     )
-                    write_last_scheduled(next_ts)
-                    next_ts += random.randint(delay_min, delay_max)
 
                 # Cleanup
                 photo_path.unlink(missing_ok=True)

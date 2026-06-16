@@ -227,8 +227,12 @@ def transform_video(
     logo_scale: float = 0.18,
     logo_margin: int = 24,
     metadata: dict | None = None,
+    volume_factor: float = 1.0,
 ) -> bool:
-    """Обработать видео ffmpeg на месте. True при успехе."""
+    """Обработать видео ffmpeg на месте. True при успехе.
+
+    volume_factor < 1.0 приглушает звук (1.0 = без изменения).
+    """
     path = Path(video_path)
     if not path.exists():
         return False
@@ -260,6 +264,8 @@ def transform_video(
     speed = float(transforms.get('speed', 1.0))
     if abs(speed - 1.0) > 0.001:
         a_parts.append(f'atempo={speed:.4f}')
+    if abs(volume_factor - 1.0) > 0.001:
+        a_parts.append(f'volume={volume_factor:.3f}')
     a_chain = ','.join(a_parts) if a_parts else 'anull'
 
     # Сборка filter_complex. Лого масштабируется относительно ширины видео
@@ -347,7 +353,8 @@ def transform_from_profile(video_path: str | Path, profile: dict, *,
         return random.uniform(lo, hi) if hard else fallback
 
     transforms = {
-        'crop_percent': _auto('crop_percent', 0.01, 0.03, 0.02) if ap_on else 0.0,
+        # Кроп краёв отключён по требованию: контент не обрезаем.
+        'crop_percent': 0.0,
         'color_shift': bool(vt_cfg.get('color_shift', ap_on)),
         'brightness': random.uniform(-0.04, 0.06),
         'contrast': random.uniform(1.02, 1.08),
@@ -371,6 +378,9 @@ def transform_from_profile(video_path: str | Path, profile: dict, *,
 
     logo_path = wm_cfg.get('logo_path', '') if wm_on else None
 
+    # Звук тише оригинала (по требованию). Дефолт 0.7 = −30%.
+    volume_factor = float(vt_cfg.get('volume_factor', 0.7) or 1.0)
+
     result = transform_video(
         video_path,
         transforms,
@@ -379,6 +389,7 @@ def transform_from_profile(video_path: str | Path, profile: dict, *,
         logo_scale=float(wm_cfg.get('logo_scale', 0.18)),
         logo_margin=int(wm_cfg.get('logo_margin', 24)),
         metadata=metadata,
+        volume_factor=volume_factor,
     )
 
     # Финишный проход: формат кадра, рамка, фейды. В hard-режиме параметры
@@ -390,13 +401,15 @@ def transform_from_profile(video_path: str | Path, profile: dict, *,
                 # Клипы — всегда вертикаль 9:16, blur-плашки если исходник шире
                 aspect_mode = 'vertical_blur'
             else:
+                # square_crop убран — он режет контент. Оставляем original или
+                # blur-плашки (контент не обрезается).
                 aspect_mode = random.choices(
-                    ['original', 'square_blur', 'square_crop'],
-                    weights=[0.65, 0.25, 0.10],
+                    ['original', 'square_blur'],
+                    weights=[0.75, 0.25],
                 )[0]
 
-        fade_cfg = vt_cfg.get('fade')
-        do_fade = fade_cfg if isinstance(fade_cfg, bool) else (random.random() < 0.2)
+        # Фейды отключены по требованию (раньше срабатывали случайно).
+        do_fade = False
 
         frame_px = int(vt_cfg.get('frame_px', 0) or 0)
         if frame_px == 0 and hard and random.random() < 0.1:
@@ -409,7 +422,7 @@ def transform_from_profile(video_path: str | Path, profile: dict, *,
             frame_px=frame_px,
             frame_color=random.choice(['black', 'white']),
             fade=do_fade,
-            fade_duration=random.uniform(0.4, 0.8),
+            fade_duration=random.uniform(0.3, 0.5),
         )
         result = result or fin
 

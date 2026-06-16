@@ -99,6 +99,104 @@ def test_download_all_worker_reassigns_budget_when_source_returns_less(monkeypat
     assert requested == [("1", 34), ("2", 48), ("3", 47)]
 
 
+def test_eligible_sources_in_season_drops_disabled_and_blocked(monkeypatch):
+    from workers.download import eligible_sources_in_season
+
+    sources = [
+        {"community_id": "1", "enabled": True},
+        {"community_id": "2", "enabled": False},
+        {"community_id": "3", "enabled": True},
+    ]
+    monkeypatch.setattr("services.seasonality.order_sources_by_season", lambda s: s)
+    monkeypatch.setattr("services.source_quality.is_source_blocked", lambda cid: cid == "3")
+
+    eligible = eligible_sources_in_season(sources)
+
+    assert [s["community_id"] for s in eligible] == ["1"]
+
+
+def test_download_photos_worker_spreads_budget_across_channels(monkeypatch, tmp_path):
+    import config
+    from config import app_state
+    import workers.photos as photos
+
+    monkeypatch.setattr(config, "STORAGE_DIR", tmp_path)
+    monkeypatch.setattr(
+        app_state,
+        "config",
+        {
+            "active_profile": "p",
+            "profiles": {
+                "p": {
+                    "sources": [
+                        {"community_id": "1", "enabled": True},
+                        {"community_id": "2", "enabled": True},
+                        {"community_id": "3", "enabled": True},
+                    ],
+                    "photos_settings": {"photos_download_per_run": 100},
+                }
+            },
+        },
+    )
+    app_state.is_downloading_photos = True
+    monkeypatch.setattr(app_state, "add_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr("services.seasonality.order_sources_by_season", lambda sources: sources)
+    monkeypatch.setattr("services.source_quality.is_source_blocked", lambda cid: False)
+
+    requested = []
+    returned = iter([5, 48, 47])
+
+    def fake_source(cid, count):
+        requested.append((cid, count))
+        return next(returned)
+
+    monkeypatch.setattr(photos, "_download_photos_source", fake_source)
+
+    photos.download_photos_worker()
+
+    assert requested == [("1", 34), ("2", 48), ("3", 47)]
+
+
+def test_download_videos_worker_spreads_budget_across_channels(monkeypatch, tmp_path):
+    import config
+    from config import app_state
+    import workers.videos as videos
+
+    monkeypatch.setattr(config, "STORAGE_DIR", tmp_path)
+    monkeypatch.setattr(
+        app_state,
+        "config",
+        {
+            "active_profile": "p",
+            "profiles": {
+                "p": {
+                    "sources": [
+                        {"community_id": "1", "enabled": True},
+                        {"community_id": "2", "enabled": True},
+                    ],
+                    "videos_settings": {"videos_download_per_run": 10},
+                }
+            },
+        },
+    )
+    app_state.is_downloading_videos = True
+    monkeypatch.setattr(app_state, "add_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr("services.seasonality.order_sources_by_season", lambda sources: sources)
+    monkeypatch.setattr("services.source_quality.is_source_blocked", lambda cid: False)
+
+    requested = []
+
+    def fake_source(cid, count, **kwargs):
+        requested.append((cid, count))
+        return count
+
+    monkeypatch.setattr(videos, "_download_videos_source", fake_source)
+
+    videos.download_videos_worker()
+
+    assert requested == [("1", 5), ("2", 5)]
+
+
 def test_download_batch_respects_config_bounds():
     assert download_batch_size(remaining=10, dl_cfg={"batch_size": 500}) == 100
     assert download_batch_size(remaining=10, dl_cfg={"batch_size": 0}) == 100

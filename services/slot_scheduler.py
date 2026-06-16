@@ -97,6 +97,7 @@ def _min_gap_seconds(profile: dict) -> int:
 
 _DEFAULT_VIDEOS_DAILY_LIMIT = 1
 _DEFAULT_CLIPS_DAILY_LIMIT = 2
+_DEFAULT_PHOTOS_DAILY_LIMIT = 1
 
 
 def _daily_limit(media_type: str, profile: dict) -> Optional[int]:
@@ -107,7 +108,12 @@ def _daily_limit(media_type: str, profile: dict) -> Optional[int]:
     if media_type == 'clips':
         limit = profile.get('clips_settings', {}).get('daily_limit')
         return int(limit) if limit else _DEFAULT_CLIPS_DAILY_LIMIT
-    if media_type in ('posts', 'photos'):
+    if media_type == 'photos':
+        # У фото свой дневной лимит, отдельно от постов (раньше делили
+        # max_posts_per_day). Дефолт 1 — анти-спам «по чуть-чуть».
+        limit = profile.get('photos_settings', {}).get('daily_limit')
+        return int(limit) if limit else _DEFAULT_PHOTOS_DAILY_LIMIT
+    if media_type == 'posts':
         limit = int(profile.get('publishing_settings', {}).get('max_posts_per_day', 0))
         return limit or None
     return None
@@ -118,6 +124,53 @@ def _count_for_day(slots: list, media_type: str, day_start: int, day_end: int) -
         1 for s in slots
         if s['media_type'] == media_type and day_start <= s['ts'] < day_end
     )
+
+
+def _count_all_for_day(slots: list, day_start: int, day_end: int) -> int:
+    return sum(1 for s in slots if day_start <= s['ts'] < day_end)
+
+
+def _global_daily_limit(profile: dict) -> Optional[int]:
+    """Потолок публикаций в день по ВСЕМ типам сразу. 0/нет = без лимита."""
+    limit = int(profile.get('publishing_settings', {}).get('max_total_per_day', 0) or 0)
+    return limit or None
+
+
+def _day_bounds(ts: int) -> tuple[int, int]:
+    day_start = int(
+        datetime.fromtimestamp(ts).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).timestamp()
+    )
+    return day_start, day_start + 86400
+
+
+def _apply_publish_window(ts: int, profile: dict) -> int:
+    """Сдвинуть слот в дневное окно публикации, чтобы не постить ночью.
+
+    Опционально (publishing_settings.apply_window_to_media). Использует уже
+    настроенное окно постов publish_hours_start/end — отдельной настройки не
+    заводим. Выключено по умолчанию: поведение медиа-циклов не меняется,
+    пока пользователь явно не включит.
+    """
+    ps = profile.get('publishing_settings', {}) or {}
+    if not ps.get('apply_window_to_media'):
+        return ts
+    if not ps.get('publish_hours_enabled', True):
+        return ts
+    start = int(ps.get('publish_hours_start', 8))
+    end = int(ps.get('publish_hours_end', 22))
+    if not (0 <= start < end <= 24):
+        return ts
+    d = datetime.fromtimestamp(ts)
+    if d.hour < start:
+        d = d.replace(hour=start, minute=random.randint(0, 59), second=random.randint(0, 59))
+    elif d.hour >= end:
+        from datetime import timedelta
+        d = (d + timedelta(days=1)).replace(
+            hour=start, minute=random.randint(0, 59), second=random.randint(0, 59)
+        )
+    return int(d.timestamp())
 
 
 def reserve_slot(
@@ -139,6 +192,7 @@ def reserve_slot(
     profile = profile if profile is not None else app_state.profile
     min_gap = _min_gap_seconds(profile)
     daily_limit = _daily_limit(media_type, profile)
+    global_limit = _global_daily_limit(profile)
 
     lock = _acquire_lock()
     try:
@@ -165,16 +219,28 @@ def reserve_slot(
         # daily_limit постов этого типа — переносим на следующий день
         if daily_limit is not None:
             for _ in range(14):  # не более 14 дней вперёд
-                day_start = int(
-                    datetime.fromtimestamp(candidate).replace(
-                        hour=0, minute=0, second=0, microsecond=0
-                    ).timestamp()
-                )
-                day_end = day_start + 86400
+                day_start, day_end = _day_bounds(candidate)
                 if _count_for_day(slots, media_type, day_start, day_end) < daily_limit:
                     break
                 candidate = day_end + random.randint(delay_min, delay_max)
                 occupied = sorted(occupied + [candidate])
+
+        # Глобальный потолок: суммарно по всем типам за день. Защита от спама,
+        # когда включены все циклы сразу. Выключен по умолчанию (0 = без лимита).
+        if global_limit is not None:
+            for _ in range(14):
+                day_start, day_end = _day_bounds(candidate)
+                if _count_all_for_day(slots, day_start, day_end) < global_limit:
+                    break
+                candidate = day_end + random.randint(delay_min, delay_max)
+                occupied = sorted(occupied + [candidate])
+
+        # Дневное окно публикации (опционально) — не постить ночью.
+        candidate = _apply_publish_window(candidate, profile)
+        for _ in range(50):
+            if not any(abs(candidate - occ) < min_gap for occ in occupied):
+                break
+            candidate = _apply_publish_window(candidate + min_gap, profile)
 
         slots.append({'media_type': media_type, 'ts': candidate})
         _save_slots(data)

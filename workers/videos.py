@@ -42,6 +42,22 @@ def _add_seen(key: str):
         pass
 
 
+# ── Внешние embed-видео ───────────────────────────────────────────
+
+def _is_external_video(video: dict) -> bool:
+    """True для внешних embed-видео (Coub/Vimeo/YouTube).
+
+    У них в `files` есть только `external` и нет `mp4_*`. Их нельзя скачать
+    как нативный VK mp4 — yt-dlp падает (Coub → KeyError('params'),
+    Vimeo → HTTP 401). Качать такое бессмысленно, пропускаем заранее.
+    """
+    files = video.get('files') or {}
+    if not files:
+        return False
+    has_mp4 = any(k.startswith('mp4_') for k in files)
+    return bool(files.get('external')) and not has_mp4
+
+
 # ── Скачать mp4 через yt-dlp ──────────────────────────────────────
 
 def _download_video(video_owner: int, video_id: int, dest: Path,
@@ -171,7 +187,7 @@ def _download_videos_source(community_id: str, count: int,
         except vk_api.exceptions.ApiError as e:
             code = getattr(e, 'code', 0)
             if code == 204:
-                app_state.add_log(f'{label} VK API {code}: {e}', 'warning')
+                app_state.add_log(f'{label} {owner_id}: нет доступа к видео источника (204)', 'info')
                 break
             app_state.add_log(f'{label} VK API {code}: {e}', 'error')
             if code in (5, 28):
@@ -193,6 +209,10 @@ def _download_videos_source(community_id: str, count: int,
             key = f'{vid_owner}_{vid_id}'
 
             if key in seen:
+                skipped += 1
+                continue
+
+            if _is_external_video(video):
                 skipped += 1
                 continue
 
@@ -258,33 +278,42 @@ def _download_videos_source(community_id: str, count: int,
             break
 
     app_state.add_log(f'{label} [{owner_id}]: {downloaded} скачано, {skipped} пропущено', 'info')
+    return downloaded
 
 
 def download_videos_worker():
     profile = app_state.profile
-    sources = [s for s in profile.get('sources', []) if s.get('enabled')]
+    sources = profile.get('sources', [])
     cfg = profile.get('videos_settings', {})
     count  = int(cfg.get('videos_download_per_run', cfg.get('videos_per_run', 10)))
     max_mb = int(cfg.get('max_filesize_mb', 500))
     quality = cfg.get('quality', '720')
 
-    if not sources:
+    enabled_count = sum(1 for s in sources if s.get('enabled'))
+    if not enabled_count:
         app_state.add_log('Видео: нет активных источников', 'warning')
         app_state.is_downloading_videos = False
         return
     try:
-        from services.seasonality import order_sources_by_season
-        from services.source_quality import is_source_blocked
-        sources = order_sources_by_season(sources)
-        for src in sources:
-            if not app_state.is_downloading_videos:
+        from workers.download import eligible_sources_in_season, per_source_download_count
+        eligible = eligible_sources_in_season(sources)
+        if not eligible:
+            app_state.add_log('Видео: все источники в стоп-листе', 'warning')
+            return
+        blocked = enabled_count - len(eligible)
+        if blocked:
+            app_state.add_log(f'Видео: пропущено стоп-источников {blocked}', 'info')
+        total = len(eligible)
+        remaining = count
+        for i, src in enumerate(eligible, 1):
+            if not app_state.is_downloading_videos or remaining <= 0:
                 break
             cid = str(src.get('community_id', ''))
-            if is_source_blocked(cid):
-                app_state.add_log(f'Видео: источник {src.get("name", cid)} в стоп-листе — пропускаю', 'info')
-                continue
-            app_state.add_log(f'Видео: источник {src.get("name", cid)}', 'info')
-            _download_videos_source(cid, count, max_mb=max_mb, quality=quality, is_clips_mode=False)
+            name = src.get('name', cid)
+            per = per_source_download_count(remaining, total - i + 1)
+            app_state.add_log(f'Видео: канал {i}/{total} «{name}» — беру до {per}', 'info')
+            got = int(_download_videos_source(cid, per, max_mb=max_mb, quality=quality, is_clips_mode=False) or 0)
+            remaining = max(0, remaining - got)
     except Exception as e:
         app_state.add_log(f'Видео загрузка: {e}', 'error')
     finally:
@@ -371,10 +400,27 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                     except Exception as e:
                         app_state.add_log(f'{label}: оверлей {e}', 'warning')
 
+                # Своя подпись вместо оригинального текста источника: идёт и в
+                # описание видео/клипа (его видно под рилсом), и в запись на
+                # стене. Раньше в video.save уходили title/description исходника
+                # — на клипах оставался чужой текст.
+                from services.content_library import compose_caption_with_meta
+                processing = profile.get('processing', {})
+                # Для видео и клипов — клиповые веса семейств (CTA важнее)
+                text, caption_meta = compose_caption_with_meta(
+                    '',
+                    add_tags=True,
+                    profile_tags=processing.get('hashtags', []),
+                    add_profile_tags=processing.get('add_hashtags', False),
+                    media_format='clip',
+                )
+                own_title = (text.split('\n', 1)[0][:100].strip()
+                             or ('Клип' if is_clips_mode else 'Видео'))
+
                 vid_owner, vid_id = _upload_video(
                     vk_user, gid_num, video_path,
-                    title=meta.get('title', 'Видео'),
-                    desc=meta.get('description', ''),
+                    title=own_title,
+                    desc=text,
                     is_clip=is_clips_mode,
                 )
                 if not vid_id:
@@ -387,17 +433,6 @@ def publish_videos_worker(count: int, is_clips_mode: bool = False):
                 att = f'video{vid_owner}_{vid_id}'
 
                 if create_wall:
-                    from services.content_library import compose_caption_with_meta
-                    processing = profile.get('processing', {})
-                    # Для видео и клипов — клиповые веса семейств (CTA важнее)
-                    text, caption_meta = compose_caption_with_meta(
-                        '',
-                        add_tags=True,
-                        profile_tags=processing.get('hashtags', []),
-                        add_profile_tags=processing.get('add_hashtags', False),
-                        media_format='clip',
-                    )
-
                     from services.slot_scheduler import reserve_slot
                     next_ts = reserve_slot(media_type, delay_min, delay_max)
 
@@ -591,6 +626,9 @@ def download_top_competitor_videos(count: int = 5, is_clips_mode: bool = False) 
 
             key = f'{vid_owner}_{vid_id}'
             if key in seen:
+                continue
+
+            if _is_external_video(vid_obj):
                 continue
 
             duration = vid_obj.get('duration', 0)

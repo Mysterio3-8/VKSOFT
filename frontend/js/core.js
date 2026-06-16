@@ -28,6 +28,8 @@ const num = id => Number(val(id) || 0);
 const checked = id => !!$(id)?.checked;
 const setValue = (id, value) => { const el = $(id); if (el) el.value = value ?? ''; };
 const setChecked = (id, value) => { const el = $(id); if (el) el.checked = !!value; };
+const setText = (id, value) => { const el = $(id); if (el) el.textContent = value ?? ''; };
+const setHtml = (id, value) => { const el = $(id); if (el) el.innerHTML = value; };
 const esc = value => String(value ?? '').replace(/[&<>"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]));
 const escAttr = value => String(value ?? '').replace(/[&<>"'\\]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '\\': '\\\\' }[char]));
 
@@ -88,8 +90,8 @@ const showToast = notify;
 function switchTab(tab) {
   document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
   document.querySelectorAll('.tab-content').forEach(section => section.classList.toggle('active', section.id === tab));
-  $('topbarTitle').textContent = titles[tab] || tab;
-  $('profileDropdown').classList.remove('active');
+  setText('topbarTitle', titles[tab] || tab);
+  $('profileDropdown')?.classList.remove('active');
   renderActiveTab(tab);
 }
 

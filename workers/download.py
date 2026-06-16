@@ -40,6 +40,19 @@ def per_source_download_count(total_count: int, source_count: int) -> int:
     return max(1, int((int(total_count) + source_count - 1) / source_count))
 
 
+def eligible_sources_in_season(sources: list) -> list:
+    """Активные, не в стоп-листе источники, упорядоченные по сезону.
+
+    Общий вход для всех медиа-воркеров, чтобы брать «по чуть-чуть» с каждого
+    канала, а не весь лимит с одного.
+    """
+    from services.seasonality import order_sources_by_season
+    from services.source_quality import is_source_blocked
+    enabled = [s for s in sources if s.get('enabled')]
+    ordered = order_sources_by_season(enabled)
+    return [s for s in ordered if not is_source_blocked(str(s.get('community_id', '')))]
+
+
 def select_photos_for_download(photos: list, profile: Dict, dl_cfg: Dict) -> list:
     if not photos:
         return []

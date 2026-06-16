@@ -9,7 +9,6 @@ last_scheduled + fetch_last_postponed_from_vk, поэтому слоты не к
 Останавливается сбросом app_state.media_loops[media_type].
 """
 
-import time
 from datetime import datetime
 
 from config import app_state
@@ -17,18 +16,6 @@ from config import app_state
 MEDIA_TYPES = ('posts', 'photos', 'videos', 'clips')
 
 _LABELS = {'posts': 'посты', 'photos': 'фото', 'videos': 'видео', 'clips': 'клипы'}
-
-_DEFAULT_INTERVAL_MIN = 180
-
-
-def loop_interval_min(media_type: str) -> int:
-    """Интервал цикла для типа: autopilot.intervals.{type}, иначе общий дефолт."""
-    intervals = app_state.profile.get('autopilot', {}).get('intervals', {})
-    try:
-        value = int(intervals.get(media_type, 0))
-    except (TypeError, ValueError):
-        value = 0
-    return value if value > 0 else _DEFAULT_INTERVAL_MIN
 
 
 def _positive_int(value, default: int) -> int:
@@ -219,46 +206,39 @@ _CYCLES = {
 
 
 def media_loop_worker(media_type: str) -> None:
-    """Бесконечный цикл одного типа медиа. Запускается в daemon-потоке."""
+    """Один проход по типу медиа: скачать → опубликовать → стоп.
+
+    Запускается в daemon-потоке. Повторов по интервалу нет — после одного
+    прохода поток завершается сам. Бот рассчитан на короткие запуски: один
+    проход забивает отложку VK, дальше VK публикует посты автономно.
+    """
     label = _LABELS[media_type]
-    app_state.add_log(
-        f'Автопилот ({label}): цикл запущен, интервал {loop_interval_min(media_type)} мин', 'info'
-    )
+    app_state.add_log(f'Автопилот ({label}): запущен (один проход)', 'info')
     try:
-        while app_state.media_loops.get(media_type):
-            _set_state(
-                media_type,
-                phase='working',
-                last_start=datetime.now().strftime('%d.%m %H:%M'),
-                next_run='',
-            )
-            _set_progress(media_type, phase='idle', current=0, total=0)
-            try:
-                _CYCLES[media_type]()
-            except Exception as e:
-                app_state.add_log(f'Автопилот ({label}): ошибка прохода: {e}', 'error')
-                _set_progress(media_type, phase='idle', current=0, total=0)
+        if not app_state.media_loops.get(media_type):
+            return
+        _set_state(
+            media_type,
+            phase='working',
+            last_start=datetime.now().strftime('%d.%m %H:%M'),
+            next_run='',
+        )
+        _set_progress(media_type, phase='idle', current=0, total=0)
+        try:
+            _CYCLES[media_type]()
+        except Exception as e:
+            app_state.add_log(f'Автопилот ({label}): ошибка прохода: {e}', 'error')
 
-            try:
-                from services.publish_log import rotate_old_logs
-                rotate_old_logs()
-            except Exception:
-                pass
-
-            if not app_state.media_loops.get(media_type):
-                break
-            interval_sec = loop_interval_min(media_type) * 60
-            next_run = datetime.fromtimestamp(time.time() + interval_sec).strftime('%H:%M')
-            _set_state(media_type, phase='sleeping', next_run=next_run)
-            # Спим короткими шагами, чтобы стоп срабатывал быстро
-            deadline = time.time() + interval_sec
-            while time.time() < deadline and app_state.media_loops.get(media_type):
-                time.sleep(5)
+        try:
+            from services.publish_log import rotate_old_logs
+            rotate_old_logs()
+        except Exception:
+            pass
     finally:
         app_state.media_loops[media_type] = False
         _set_state(media_type, phase='stopped', next_run='')
         _set_progress(media_type, phase='idle', current=0, total=0)
-        app_state.add_log(f'Автопилот ({label}): цикл остановлен', 'info')
+        app_state.add_log(f'Автопилот ({label}): проход завершён', 'info')
 
 
 def stop_loop(media_type: str) -> None:
@@ -282,7 +262,6 @@ def loops_status() -> dict:
     return {
         media_type: {
             'running': bool(app_state.media_loops.get(media_type)),
-            'interval_min': loop_interval_min(media_type),
             'download_count': loop_download_count(media_type),
             'publish_count': loop_publish_count(media_type),
             **app_state.media_loop_state.get(media_type, {}),

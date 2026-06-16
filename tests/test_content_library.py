@@ -8,6 +8,7 @@ from services.content_library import (
     DEFAULT_POLLS,
     ENGAGEMENT_ENTRIES,
     FORMAT_CATEGORY_WEIGHTS,
+    MAX_HASHTAGS,
     MISSION_ENTRIES,
     QUESTION_ENTRIES,
     RATING_ENTRIES,
@@ -131,6 +132,7 @@ def test_compose_caption_adds_universal_and_profile_tags_once(monkeypatch):
         "services.content_library.load_library",
         lambda profile_id=None: {
             "enabled": True,
+            "emoji_mode": False,
             "cta_enabled": False,
             "universal_mode": True,
             "entries": [{"text": "Зима в кадре.", "tags": "#зима"}],
@@ -151,6 +153,144 @@ def test_compose_caption_adds_universal_and_profile_tags_once(monkeypatch):
     assert text.count("#кадр") == 1
     assert "#настроение" in text
     assert "Зима" not in text
+
+
+def test_compose_caption_caps_total_tags_and_prefers_manual(monkeypatch):
+    monkeypatch.setattr(
+        "services.content_library.load_library",
+        lambda profile_id=None: {"enabled": False},
+    )
+
+    text = compose_caption(
+        "",
+        add_tags=True,
+        profile_tags=["#альфа", "#бета"],
+        add_profile_tags=True,
+        extra_tags=["#к1", "#к2", "#к3", "#к4", "#к5"],
+    )
+
+    tags = [w for w in text.split() if w.startswith("#")]
+    assert len(tags) == MAX_HASHTAGS
+    assert "#альфа" in tags
+    assert "#бета" in tags
+
+
+def test_filter_forbidden_hashtags_removes_banned_case_insensitive():
+    from services.content_library import filter_forbidden_hashtags
+
+    out = filter_forbidden_hashtags(['#Море', '#лес', '#город'], ['море', '#ГОРОД'])
+
+    assert out == ['#лес']
+
+
+def test_caption_has_stop_word_detects_substring_case_insensitive():
+    from services.content_library import caption_has_stop_word
+
+    assert caption_has_stop_word('Купить СЕЙЧАС!', ['купить'])
+    assert not caption_has_stop_word('Красивый вид', ['купить'])
+    assert not caption_has_stop_word('любой текст', [])
+
+
+def test_diversify_keeps_base_when_no_other_channel(monkeypatch):
+    import services.content_library as cl
+
+    monkeypatch.setattr(cl, '_load_shared_hashtags', lambda: {})
+    monkeypatch.setattr(cl, '_save_shared_hashtags', lambda data: None)
+
+    chosen = cl.diversify_hashtags(['#a', '#b', '#c', '#d'], 'me')
+
+    assert chosen == ['#a', '#b', '#c']
+
+
+def test_diversify_avoids_other_channel_recent_set(monkeypatch):
+    import services.content_library as cl
+
+    store = {'other': {'tags': ['#a', '#b', '#c'], 'ts': time.time()}}
+    monkeypatch.setattr(cl, '_load_shared_hashtags', lambda: dict(store))
+    saved = {}
+    monkeypatch.setattr(cl, '_save_shared_hashtags', lambda data: saved.update(data))
+
+    chosen = cl.diversify_hashtags(['#a', '#b', '#c', '#d'], 'me')
+
+    assert frozenset(t.lower() for t in chosen) != frozenset({'#a', '#b', '#c'})
+    assert len(chosen) == MAX_HASHTAGS
+    assert 'me' in saved
+
+
+def test_compose_caption_drops_forbidden_hashtag(monkeypatch):
+    monkeypatch.setattr(
+        'services.content_library.load_library',
+        lambda profile_id=None: {'enabled': False, 'forbidden_hashtags': ['#бета']},
+    )
+    monkeypatch.setattr(
+        'services.content_library.diversify_hashtags',
+        lambda ordered, profile_id, **kw: ordered[:MAX_HASHTAGS],
+    )
+
+    text = compose_caption(
+        '',
+        add_tags=True,
+        profile_tags=['#альфа', '#бета', '#гамма'],
+        add_profile_tags=True,
+    )
+
+    tags = [w for w in text.split() if w.startswith('#')]
+    assert '#бета' not in tags
+    assert '#альфа' in tags
+
+
+def test_emoji_mode_on_by_default():
+    lib = _normalize_library({})
+    assert lib['emoji_mode'] is True
+
+
+def test_compose_emoji_mode_uses_emojis_not_text(monkeypatch):
+    import services.content_library as cl
+
+    monkeypatch.setattr(
+        cl, 'load_library',
+        lambda profile_id=None: {
+            'emoji_mode': True, 'enabled': True, 'cta_enabled': False,
+            'entries': [{'text': 'Хотели бы здесь оказаться?', 'tags': '', 'category': 'question'}],
+        },
+    )
+    monkeypatch.setattr(cl, 'diversify_hashtags', lambda ordered, profile_id, **kw: ordered[:MAX_HASHTAGS])
+
+    text, meta = cl.compose_caption_with_meta(
+        '', add_tags=True, profile_tags=['#природа', '#красота'], add_profile_tags=True,
+    )
+
+    assert any(e in text for e in cl.EMOJI_POOL)
+    assert 'Хотели бы' not in text
+    assert meta == {}
+    tags = [w for w in text.split() if w.startswith('#')]
+    assert tags  # рандомные хэштеги присутствуют
+
+
+def test_compose_emoji_mode_subscribe_cta_when_enabled(monkeypatch):
+    import services.content_library as cl
+
+    monkeypatch.setattr(
+        cl, 'load_library',
+        lambda profile_id=None: {'emoji_mode': True, 'cta_enabled': True},
+    )
+    monkeypatch.setattr(cl.random, 'random', lambda: 0.0)  # форсим показ призыва
+
+    text, _ = cl.compose_caption_with_meta('', add_tags=False, add_profile_tags=False)
+    assert any(cta in text for cta in cl.SUBSCRIBE_CTAS)
+
+
+def test_compose_emoji_mode_no_cta_when_disabled(monkeypatch):
+    import services.content_library as cl
+
+    monkeypatch.setattr(
+        cl, 'load_library',
+        lambda profile_id=None: {'emoji_mode': True, 'cta_enabled': False},
+    )
+    monkeypatch.setattr(cl.random, 'random', lambda: 0.0)
+
+    text, _ = cl.compose_caption_with_meta('', add_tags=False, add_profile_tags=False)
+    assert not any(cta in text for cta in cl.SUBSCRIBE_CTAS)
 
 
 def test_normalize_library_replaces_old_entries_and_migrates_weights():

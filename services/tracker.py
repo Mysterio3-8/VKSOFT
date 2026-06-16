@@ -255,6 +255,98 @@ def get_scored_posts() -> list:
     ]
 
 
+def get_reach_trend(
+    days: int = 7,
+    drop_threshold_pct: float = 25.0,
+    media_type: str = '',
+) -> dict:
+    """Сравнить средний охват за последние `days` дней с предыдущим окном.
+
+    Ранний сигнал теневого бана: устойчивое падение охвата без смены темы.
+    signal: 'down' (падение >= порога), 'ok', 'insufficient' (мало постов).
+    media_type ограничивает выборку одним типом ('posts'/'photo'/'video'/'clip').
+    """
+    data = _load()
+    now = int(time.time())
+    win = days * 86400
+    recent_start = now - win
+    prev_start = now - 2 * win
+
+    def _avg_views(lo: int, hi: int) -> tuple[int, int]:
+        vals = [
+            int(p.get('views', 0) or 0)
+            for p in data
+            if _eligible(p) and lo <= int(p.get('published_at', 0) or 0) < hi
+            and (not media_type or p.get('media_type', 'photo') == media_type)
+        ]
+        return (round(sum(vals) / len(vals)), len(vals)) if vals else (0, 0)
+
+    recent_avg, recent_n = _avg_views(recent_start, now)
+    prev_avg, prev_n = _avg_views(prev_start, recent_start)
+
+    if recent_n < 3 or prev_n < 3:
+        signal, delta = 'insufficient', 0.0
+    else:
+        delta = round((recent_avg - prev_avg) / max(prev_avg, 1) * 100, 1)
+        signal = 'down' if delta <= -drop_threshold_pct else 'ok'
+
+    return {
+        'days': days,
+        'media_type': media_type or 'all',
+        'recent_avg_views': recent_avg,
+        'prev_avg_views': prev_avg,
+        'recent_posts': recent_n,
+        'prev_posts': prev_n,
+        'delta_pct': delta,
+        'signal': signal,
+    }
+
+
+# Типы медиа в трекере (как их пишет track()): посты/фото/видео/клипы.
+REACH_MEDIA_TYPES = ('posts', 'photo', 'video', 'clip')
+
+_RISE_THRESHOLD_PCT = 10.0  # рост охвата, после которого можно наращивать объём
+
+
+def _volume_recommendation(overall: dict) -> tuple[str, str]:
+    """По общему тренду охвата советует объём публикаций (без авто-правок).
+
+    Возвращает (код, человекочитаемый текст). Лимиты пользователь меняет сам.
+    """
+    signal = overall.get('signal')
+    delta = float(overall.get('delta_pct', 0.0) or 0.0)
+    if signal == 'insufficient':
+        return ('insufficient',
+                'Мало данных за 2 недели — держите текущий темп, копим статистику.')
+    if signal == 'down':
+        return ('reduce',
+                f'Охват падает ({delta:+.0f}%) — снизьте дневные лимиты, '
+                'возможен теневой бан.')
+    if delta >= _RISE_THRESHOLD_PCT:
+        return ('increase',
+                f'Охват растёт ({delta:+.0f}%) — можно осторожно поднять лимиты.')
+    return ('hold', f'Охват стабилен ({delta:+.0f}%) — держите текущий объём.')
+
+
+def get_reach_trend_by_type(days: int = 7) -> dict:
+    """Тренд охвата отдельно по каждому типу медиа + общая рекомендация объёма.
+
+    Нужно, чтобы понимать «когда много постить, а когда мало»: если охват
+    падает — сигнал снизить объём (теневой бан), если растёт — можно прибавить.
+    Лимиты не меняются автоматически: это подсказка для ручной настройки.
+    """
+    overall = get_reach_trend(days)
+    by_type = {mt: get_reach_trend(days, media_type=mt) for mt in REACH_MEDIA_TYPES}
+    code, text = _volume_recommendation(overall)
+    return {
+        'days': days,
+        'overall': overall,
+        'by_type': by_type,
+        'recommendation': code,
+        'recommendation_text': text,
+    }
+
+
 def build_caption_stats(data: list, media_type: str = '') -> dict:
     """Агрегировать engagement по категориям подписей (опционально по формату).
 
@@ -403,17 +495,6 @@ def run_check():
 
         if updated:
             _save(data)
-
-        # Алерт: подозрительно низкий охват
-        if tracking_cfg.get('alert_low_views', False):
-            checked = [p for p in data if p.get('checked') and p.get('views', 0) > 0]
-            if len(checked) >= 10:
-                avg = sum(p['views'] for p in checked) / len(checked)
-                very_low = [p for p in checked[-20:] if p['views'] < avg * 0.3]
-                if len(very_low) >= 3:
-                    msg = f'Низкий охват: {len(very_low)} постов < 30% от среднего ({int(avg)} просм.)'
-                    logger.warning(msg)
-                    app_state.add_log(f'[Трекер] ⚠️ {msg}', 'warning')
 
     except Exception as e:
         logger.warning(f'tracker run_check: {e}')

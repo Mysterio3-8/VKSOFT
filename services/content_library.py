@@ -24,6 +24,11 @@ from typing import Iterable
 from config import STORAGE_DIR, app_state, logger
 
 
+# Максимум хэштегов на пост. Переспам тегами режет органический охват VK,
+# поэтому держим жёсткий потолок суммарно по всем источникам тегов.
+MAX_HASHTAGS = 3
+
+
 # Веса семейств по формату (из отчёта): фото продают комментарий,
 # клипы — подписку, поэтому у клипов CTA весит больше всего.
 FORMAT_CATEGORY_WEIGHTS = {
@@ -585,6 +590,40 @@ UNIVERSAL_CTAS = [
     'Лайк, если такие места тебя заряжают.',
 ]
 
+# ── Эмодзи-подписи ────────────────────────────────────────────────
+# Пользователь просил убрать текстовые подписи: только красивые смайлы
+# (сердечки и т.п.) + рандомные хэштеги, иногда призыв подписаться/лайкнуть/
+# поделиться. Это режим по умолчанию (emoji_mode), управляется в настройках.
+
+EMOJI_POOL = [
+    '❤️', '🤍', '💚', '💙', '🧡', '💛',
+    '🌿', '🍃', '🌳', '🌸', '🌼', '🦋', '🕊️',
+    '🌍', '🌎', '🌏', '🌅', '🌄', '🏔️', '🌊', '☀️', '🌙', '⭐', '✨',
+]
+
+# Призыв «подпишись / поставь лайк / поделись с другом» с эмодзи.
+SUBSCRIBE_CTAS = [
+    'Подпишись на канал 🔔  Поставь лайк ❤️  Поделись с другом 🔁',
+    'Подписывайся 🔔 · Ставь лайк 👍 · Делись с друзьями 💚',
+    'Лайк ❤️  Подписка 🔔  Репост 🔁',
+    'Жми лайк ❤️ и подпишись 🔔 — так нас станет больше 🌍',
+    'Понравилось? Подпишись 🔔 и поделись с другом 🤍',
+]
+
+EMOJI_MIN = 1
+EMOJI_MAX = 3
+SUBSCRIBE_CTA_CHANCE = 0.35  # доля постов с призывом подписаться
+
+
+def random_emojis(lo: int = EMOJI_MIN, hi: int = EMOJI_MAX) -> str:
+    n = random.randint(lo, hi)
+    return ' '.join(random.sample(EMOJI_POOL, min(n, len(EMOJI_POOL))))
+
+
+def random_subscribe_cta() -> str:
+    return random.choice(SUBSCRIBE_CTAS)
+
+
 DEFAULT_POLLS = [
     {'question': 'Какой вариант ближе?', 'answers': ['Первый', 'Второй', 'Оба хороши', 'Сложно выбрать']},
     {'question': 'Какое впечатление?', 'answers': ['Очень нравится', 'Спокойно', 'Не мое', 'Хочу еще']},
@@ -666,6 +705,9 @@ def _default_weights() -> dict:
 def _default_lib() -> dict:
     return {
         'enabled': False,
+        # Режим эмодзи-подписей включён по умолчанию: смайлы + хэштеги вместо
+        # текстовых шаблонов. Призыв подписаться добавляется при cta_enabled.
+        'emoji_mode': True,
         'cta_enabled': False,
         'universal_mode': True,
         'niche': 'universal',
@@ -676,6 +718,10 @@ def _default_lib() -> dict:
         'caption_cooldown_days': CAPTION_COOLDOWN_DAYS,
         'promo_messages': list(DEFAULT_PROMO_MESSAGES),
         'promo_enabled': False,
+        # Защита от теневого бана: слова, которых не должно быть в подписи,
+        # и хэштеги, которые нельзя публиковать (спам-сигналы для VK).
+        'stop_words': [],
+        'forbidden_hashtags': [],
     }
 
 
@@ -720,6 +766,12 @@ def _normalize_library(data: dict) -> dict:
         lib['promo_messages'] = list(DEFAULT_PROMO_MESSAGES)
     if 'promo_enabled' not in lib:
         lib['promo_enabled'] = False
+    if 'emoji_mode' not in lib:
+        lib['emoji_mode'] = True
+    if not isinstance(lib.get('stop_words'), list):
+        lib['stop_words'] = []
+    if not isinstance(lib.get('forbidden_hashtags'), list):
+        lib['forbidden_hashtags'] = []
     try:
         lib['caption_cooldown_days'] = max(0, int(lib.get('caption_cooldown_days', CAPTION_COOLDOWN_DAYS)))
     except (TypeError, ValueError):
@@ -886,6 +938,10 @@ def get_random_entry(media_format: str = 'photo') -> dict:
         category = random.choices(categories, weights=weights, k=1)[0]
 
     pool = _filter_cooldown(by_category[category], int(lib.get('caption_cooldown_days', CAPTION_COOLDOWN_DAYS)))
+    stop_words = lib.get('stop_words') or []
+    if stop_words:
+        clean = [e for e in pool if not caption_has_stop_word(e.get('text', ''), stop_words)]
+        pool = clean or pool
     entry = random.choice(pool)
     _record_usage(entry)
     return entry
@@ -934,6 +990,105 @@ def dedupe_hashtags(*values) -> str:
     return ' '.join(result)
 
 
+# ── Защита подписи от стоп-слов и запрещённых хэштегов ────────────
+
+
+def _normalize_tag(tag: str) -> str:
+    t = str(tag).strip().lower()
+    return t if t.startswith('#') else f'#{t}'
+
+
+def filter_forbidden_hashtags(tags: list[str], forbidden) -> list[str]:
+    """Убрать из списка тегов запрещённые (сравнение без регистра, с/без #)."""
+    if not forbidden:
+        return tags
+    banned = {_normalize_tag(t) for t in forbidden if str(t).strip()}
+    return [t for t in tags if t.lower() not in banned]
+
+
+def caption_has_stop_word(text: str, stop_words) -> bool:
+    """True, если в тексте встречается любое стоп-слово (без регистра)."""
+    if not text or not stop_words:
+        return False
+    low = text.lower()
+    return any(str(w).strip().lower() in low for w in stop_words if str(w).strip())
+
+
+# ── Разведение хэштегов между каналами ───────────────────────────
+# Один и тот же набор тегов в разных группах VK расценивает как рассылку
+# дубля. Делим общий журнал использованных наборов между профилями и
+# подбираем для текущего канала набор, не совпадающий с недавним чужим.
+
+
+_HASHTAG_DIVERSITY_WINDOW_DAYS = 2
+
+
+def _shared_hashtag_file() -> Path:
+    return STORAGE_DIR / '_shared' / 'hashtag_usage.json'
+
+
+def _load_shared_hashtags() -> dict:
+    f = _shared_hashtag_file()
+    if f.exists():
+        try:
+            return json.loads(f.read_text(encoding='utf-8'))
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_shared_hashtags(data: dict) -> None:
+    f = _shared_hashtag_file()
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.parent / f'.tmp_{f.name}'
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+        os.replace(tmp, f)
+    except Exception as exc:
+        logger.warning(f'hashtag_usage save: {exc}')
+
+
+def diversify_hashtags(
+    ordered: list[str],
+    profile_id: str,
+    window_days: int = _HASHTAG_DIVERSITY_WINDOW_DAYS,
+) -> list[str]:
+    """Выбрать до MAX_HASHTAGS тегов, не повторяя недавний набор чужого канала.
+
+    Сохраняет приоритет порядка `ordered` (ручные → библиотека → конкуренты):
+    сначала пробуем исходный срез, затем другие комбинации того же размера.
+    Возвращает срез как есть, если развести нельзя (мало тегов/нет данных).
+    """
+    base = ordered[:MAX_HASHTAGS]
+    if len(ordered) <= 1:
+        return base
+    try:
+        data = _load_shared_hashtags()
+    except Exception:
+        return base
+
+    threshold = time.time() - window_days * 86400
+    others = {
+        frozenset(t.lower() for t in entry.get('tags', []))
+        for pid, entry in data.items()
+        if pid != profile_id and float(entry.get('ts', 0)) >= threshold
+    }
+
+    chosen = base
+    if others:
+        from itertools import combinations
+        size = min(MAX_HASHTAGS, len(ordered))
+        for combo in combinations(ordered, size):
+            candidate = list(combo)
+            if frozenset(t.lower() for t in candidate) not in others:
+                chosen = candidate
+                break
+
+    data[profile_id] = {'tags': chosen, 'ts': time.time()}
+    _save_shared_hashtags(data)
+    return chosen
+
+
 def compose_caption_with_meta(
     existing_text: str = '',
     add_tags: bool = True,
@@ -948,8 +1103,16 @@ def compose_caption_with_meta(
     parts = []
     lib_tags = ''
     meta: dict = {}
+    emoji_mode = lib.get('emoji_mode', True)
 
-    if lib.get('enabled', False):
+    if emoji_mode:
+        # Без текстовых шаблонов: красивые смайлы + (иногда) призыв подписаться.
+        # Хэштеги добавляются ниже общим путём. Метаданные пустые — семейства
+        # подписей не обучаются в этом режиме.
+        parts.append(random_emojis())
+        if lib.get('cta_enabled', False) and random.random() < SUBSCRIBE_CTA_CHANCE:
+            parts.append(random_subscribe_cta())
+    elif lib.get('enabled', False):
         entry = get_random_entry(media_format)
         text = (entry.get('text') or '').strip()
         if text:
@@ -967,13 +1130,24 @@ def compose_caption_with_meta(
     elif existing_text:
         parts.append(existing_text)
 
-    all_profile_tags = list(profile_tags or [])
-    if extra_tags:
-        # Добавляем хештеги от конкурентов (до 7 — баланс охвата и спама)
-        chosen = random.sample(extra_tags, min(7, len(extra_tags)))
-        all_profile_tags.extend(chosen)
+    manual_tags = list(profile_tags or []) if add_profile_tags else []
+    # В эмодзи-режиме теги выбираем рандомно (а не всегда первые из списка).
+    if emoji_mode:
+        random.shuffle(manual_tags)
+    competitor_tags = []
+    if extra_tags and add_profile_tags:
+        competitor_tags = random.sample(extra_tags, min(MAX_HASHTAGS, len(extra_tags)))
 
-    tags = dedupe_hashtags(lib_tags if add_tags else '', all_profile_tags if add_profile_tags else None)
+    # Приоритет при урезании до MAX_HASHTAGS: ручные теги канала → теги из
+    # библиотеки → конкурентские. Свои теги важнее авто-подобранных.
+    ordered = dedupe_hashtags(
+        manual_tags,
+        lib_tags if add_tags else '',
+        competitor_tags,
+    ).split()
+    ordered = filter_forbidden_hashtags(ordered, lib.get('forbidden_hashtags') or [])
+    chosen = diversify_hashtags(ordered, app_state.active_profile_id)
+    tags = ' '.join(chosen)
     if tags:
         parts.append(tags)
 

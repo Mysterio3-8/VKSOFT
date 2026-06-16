@@ -145,6 +145,7 @@ def test_compose_caption_with_meta_returns_chosen_entry(monkeypatch):
         "services.content_library.load_library",
         lambda profile_id=None: {
             "enabled": True,
+            "emoji_mode": False,
             "cta_enabled": False,
             "entries": [{
                 "id": "M005",
@@ -169,7 +170,7 @@ def test_compose_caption_with_meta_returns_chosen_entry(monkeypatch):
 def test_compose_caption_with_meta_empty_when_library_disabled(monkeypatch):
     monkeypatch.setattr(
         "services.content_library.load_library",
-        lambda profile_id=None: {"enabled": False},
+        lambda profile_id=None: {"enabled": False, "emoji_mode": False},
     )
 
     text, meta = compose_caption_with_meta("Исходный текст", add_tags=False)

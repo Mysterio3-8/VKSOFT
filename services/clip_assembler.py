@@ -23,7 +23,9 @@ from services.video_transform import _probe_dims, _probe_duration, ffmpeg_availa
 
 _FFMPEG_TIMEOUT_SEC = 1200
 
-# Семейства hook-оверлеев из отчёта: curiosity / escape / scale / rating.
+# Семейства hook-оверлеев: curiosity / escape / scale / rating / manifest.
+# manifest — мини-манифест роста («собрать миллион ради планеты»): прямой
+# призыв к лайку/подписке как рычагу охвата клипов.
 # Ограничение длины — overlay ≤ 42 символов, 3-8 слов.
 OVERLAY_FAMILIES = {
     'curiosity': [
@@ -53,6 +55,13 @@ OVERLAY_FAMILIES = {
         'Оцените этот вид',
         'Ваша оценка этому месту?',
         'От 1 до 10 — сколько?',
+    ],
+    'manifest': [
+        'Соберём миллион ради планеты',
+        'Докажем, что нас много',
+        'Один лайк — видео улетит дальше',
+        'Подпишись, если планета важна',
+        'Нас должно стать миллион',
     ],
 }
 
@@ -209,7 +218,7 @@ def add_text_overlay(
 def apply_overlay_from_profile(video_path: str | Path, profile: dict) -> str:
     """Hook-оверлей по настройкам профиля. Возвращает семейство или ''."""
     cfg = profile.get('clips_settings', {})
-    if not cfg.get('overlay_enabled', True):
+    if not cfg.get('overlay_enabled', False):
         return ''
     font = find_font(profile)
     if not font:

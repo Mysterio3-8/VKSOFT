@@ -8,20 +8,21 @@ async function loadProfiles() {
 }
 
 function renderProfileSwitcher() {
+  const dot = $('profileDot');
   if (!state.activeProfile) {
-    $('profileName').textContent = 'Канал не выбран';
-    $('profileDot').style.background = '#9ca3af';
-    $('profileDropdown').innerHTML = '<div class="profile-dropdown-empty">Каналов нет</div>';
+    setText('profileName', 'Канал не выбран');
+    if (dot) dot.style.background = '#9ca3af';
+    setHtml('profileDropdown', '<div class="profile-dropdown-empty">Каналов нет</div>');
     return;
   }
-  $('profileName').textContent = state.activeProfile.name || 'Канал';
-  $('profileDot').style.background = '#7c3aed';
-  $('profileDropdown').innerHTML = state.profiles.map(profile => `
+  setText('profileName', state.activeProfile.name || 'Канал');
+  if (dot) dot.style.background = '#7c3aed';
+  setHtml('profileDropdown', state.profiles.map(profile => `
     <button class="profile-option ${profile.active ? 'active' : ''}" type="button" onclick="switchProfile('${escAttr(profile.id)}')">
       <span>${esc(profile.name || profile.id)}</span>
       <small>ID: ${esc(profile.group_id || profile.vk?.group_id || '-')}</small>
     </button>
-  `).join('') + '<button class="profile-option add" type="button" onclick="switchTab(\'channels\')">+ Добавить канал</button>';
+  `).join('') + '<button class="profile-option add" type="button" onclick="switchTab(\'channels\')">+ Добавить канал</button>');
 }
 
 async function loadConfig() {
@@ -33,13 +34,12 @@ async function loadDashboard() {
   const data = growthData?.dashboard || await api('/dashboard');
   state.dashboard = data;
   if (growthData?.status === 'ok') state.dashboardGrowth = growthData;
-  $('statToday').textContent = data.published_today ?? 0;
-  $('statErrors').textContent = data.errors_today ?? 0;
-  $('queueCount').textContent = data.pending ?? 0;
-  $('statErrorsCard').classList.toggle('has-errors', Number(data.errors_today || 0) > 0);
+  setText('statToday', data.published_today ?? 0);
+  setText('statErrors', data.errors_today ?? 0);
+  $('statErrorsCard')?.classList.toggle('has-errors', Number(data.errors_today || 0) > 0);
   const busy = data.is_downloading || data.is_publishing;
-  $('statusDot').classList.toggle('busy', !!busy);
-  $('statusText').textContent = busy ? 'Работает' : 'Готов';
+  $('statusDot')?.classList.toggle('busy', !!busy);
+  setText('statusText', busy ? 'Работает' : 'Готов');
   if (growthData?.status === 'ok') renderDashboardGrowth(growthData);
   else await loadDashboardGrowth();
   await loadGrowth();
@@ -63,16 +63,16 @@ function renderDashboardGrowth(data) {
   const report = ga.report || {};
   const summary = report.summary || {};
 
-  $('dashGaChannel').textContent = profile.name || profile.id || '-';
-  $('dashGaGroup').textContent = `VK ID: ${profile.group_id || '-'}`;
-  $('dashGaMembers').textContent = subscribers.members ?? subscribers.current ?? 0;
-  $('dashGaMembersDiff').textContent = `сегодня: ${subscribers.diff_today ?? 0}, неделя: ${subscribers.diff_week ?? 0}`;
-  $('dashGaViews').textContent = tracker.avg_views ?? 0;
-  $('dashGaLikes').textContent = `лайки: ${tracker.avg_likes ?? 0}, проверено: ${tracker.checked ?? 0}`;
-  if (data.phash_size != null && $('dashGaPhash')) $('dashGaPhash').textContent = `pHash: ${data.phash_size}`;
+  setText('dashGaChannel', profile.name || profile.id || '-');
+  setText('dashGaGroup', `VK ID: ${profile.group_id || '-'}`);
+  setText('dashGaMembers', subscribers.members ?? subscribers.current ?? 0);
+  setText('dashGaMembersDiff', `сегодня: ${subscribers.diff_today ?? 0}, неделя: ${subscribers.diff_week ?? 0}`);
+  setText('dashGaViews', tracker.avg_views ?? 0);
+  setText('dashGaLikes', `лайки: ${tracker.avg_likes ?? 0}, проверено: ${tracker.checked ?? 0}`);
+  if (data.phash_size != null) setText('dashGaPhash', `pHash: ${data.phash_size}`);
   // dashGaCycle обновляет apRefreshLoops (autopilot.js) — циклы по типам медиа
-  $('dashGaQueue').textContent = `сегодня: ${dashboard.published_today ?? 0}`;
-  if ($('dashGaQueue2')) $('dashGaQueue2').textContent = dashboard.pending ?? 0;
+  setText('dashGaQueue', `сегодня: ${dashboard.published_today ?? 0}`);
+  setText('dashGaQueue2', dashboard.pending ?? 0);
 
   if (!val('gaSingleSourceId')) setValue('gaSingleSourceId', settings.single_source_id || '');
   if (!val('gaHorizonDays')) setValue('gaHorizonDays', settings.horizon_days || 2);
@@ -81,11 +81,11 @@ function renderDashboardGrowth(data) {
   if (settings.source_mode) setValue('gaSourceMode', settings.source_mode);
 
   if (cycle.running) {
-    $('gaStatusText').textContent = cycle.message || cycle.phase || 'Цикл работает...';
+    setText('gaStatusText', cycle.message || cycle.phase || 'Цикл работает...');
   } else if (cycle.phase === 'done') {
-    $('gaStatusText').textContent = cycle.message || 'Цикл завершён';
+    setText('gaStatusText', cycle.message || 'Цикл завершён');
   } else {
-    $('gaStatusText').textContent = 'Автопилот готов.';
+    setText('gaStatusText', 'Автопилот готов.');
   }
 }
 

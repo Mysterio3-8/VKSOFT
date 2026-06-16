@@ -20,6 +20,7 @@
 |---|---|
 | `docs/AGENT_CONTEXT.md` | Короткий контекст для Codex: читать первым, чтобы не перечитывать весь проект |
 | `docs/PROJECT_DOCUMENTATION.md` | Полная техническая документация: все API роутеры, services, workers, тесты |
+| `docs/CHANGELOG.md` | История завершённых задач/чекпоинтов — поднимать только при вопросе «что менялось» |
 | `docs/РУКОВОДСТВО_ПОЛЬЗОВАТЕЛЯ.md` | Нетехническое руководство для владельца канала |
 | `.claude/rules/bot-invariants.md` | Архитектурные инварианты для Python-кода (слои, AppState, логирование) |
 | `.claude/commands/` | Слэш-команды: `/build`, `/state`, `/cleanup`, `/test-tokens`, `/start`, `/logs`, `/commit`, `/deploy` |
@@ -103,15 +104,18 @@ class AppState:
   `block_keywords`, скачивает фото в `photos/{cid}_{post_id}/`, сохраняет JSON
   с `_local_photos` и обновляет `download_offsets.json`.
 
-- **`monitor_worker`** (`workers/monitor.py`) — раз в `check_interval_min`
-  проверяет включённые источники; первые `max_per_cycle` постов публикует
-  почти сразу, остальные — в обычную очередь. OCR-фильтр пропускает фото с
-  текстом. `_watchdog_loop` в `main.py` перезапускает воркер при падении.
+- **`monitor_worker`** (`workers/monitor.py`) — **один проход** по
+  включённым источникам и стоп (повтора по интервалу нет — бот запускают на
+  короткое время). Первые `max_per_cycle` постов публикует почти сразу,
+  остальные — в обычную очередь. OCR-фильтр пропускает фото с текстом.
+  `_watchdog_loop` в `main.py` не перезапускает: `finally` ставит
+  `is_monitoring=False` до завершения потока, watchdog видит штатный стоп.
 
-- **`media_loop_worker`** (`workers/media_autopilot.py`) — 4 независимых
-  цикла автопилота: посты / фото / видео / клипы. Каждый: скачать →
-  антиплагиат (`services/media_pipeline.py`) → опубликовать → пауза →
-  повтор. Интервалы — `autopilot.intervals.{type}` (дефолт 180 мин).
+- **`media_loop_worker`** (`workers/media_autopilot.py`) — автопилот по 4
+  типам медиа (посты / фото / видео / клипы). На нажатие Старт делает **один
+  проход**: скачать → антиплагиат (`services/media_pipeline.py`) →
+  опубликовать → стоп. Повтора по интервалу нет. `autopilot.intervals.{type}`
+  больше не управляет таймингом (остаётся только в выдаче `loops_status`).
   Кнопки на дашборде, API: `/api/autopilot/loop/{type}/start|stop`.
 
 - **Антиплагиат** (`services/media_pipeline.py`) — единая точка для всех
@@ -138,6 +142,13 @@ class AppState:
    легаси v1, бот его не читает, можно удалить.
 7. **publish_delay_min > publish_delay_max** — код меняет местами
    автоматически, но лучше настроить правильно в конфиге.
+8. **Внешние embed-видео нельзя скачать.** Некоторые источники (напр.
+   `-78684694`) репостят видео с Coub/Vimeo/YouTube. В VK API `video.get`
+   у них `files = {'external': ...}` без `mp4_*`. yt-dlp на них падает
+   (Coub → `KeyError('params')`, Vimeo → HTTP 401). `_is_external_video()`
+   в `workers/videos.py` отсекает их до скачивания — это не ошибка, а
+   недоступный контент. Если источник целиком из внешних видео, видео-
+   автопилот по нему скачает 0 — это норма.
 
 ---
 
@@ -149,77 +160,84 @@ class AppState:
 
 ---
 
-## Checkpoint (2026-06-14 12:00)
+## Checkpoint (2026-06-16 13:56)
 
-**Редизайн фронтенда + прогресс-бары автопилота (план
-`docs/superpowers/plans/2026-06-13-design-overhaul-and-autopilot-progress.md`,
-11/11 задач + 1 фикс), смержено в `main`:**
-- Новая светлая терракотовая палитра (Anthropic-light) — CSS-токены
-  (`--accent: #d97757`, `--bg: #faf8f6` и т.д.) применены на всех страницах
-  (дашборд, каналы, настройки, библиотека, все каналы, логи, ниши), старые
-  фиолетовые цвета заменены
-- 4 карточки автопилота (Посты/Фото/Видео/Клипы) на дашборде — новый
-  компонент `.ap-cycle*`: статус-точка (работает/спит/остановлен),
-  статус-текст с фазой, прогресс-бар с заливкой/% /лейблом "X из Y"
-- `_set_progress(media_type, *, phase, current, total, label='')` в
-  `workers/media_autopilot.py` пишет прогресс в
-  `app_state.media_loop_state[type]['progress']`; вызывается из
-  `download.py`, `photos.py`, `publish.py`, `videos.py` на каждом шаге
-  скачивания/публикации для всех 4 типов медиа. Сброс в idle (`total=0`) в
-  начале каждого прохода **и при ошибке прохода** (фикс после финального
-  review — иначе бар "застывал" с надписью "Скачивание" при статусе "ждёт")
-- `frontend/js/autopilot.js`: `apRefreshLoops()` читает `st.progress` и
-  обновляет `#apProgressFill/Label/Pct-{type}` + `#apStatusDot/Text-{type}`
-  через новый `formatApStatus()`
-- Все существующие id/обработчики (`apLoopBtn-*`, `apInterval-*` и т.д.)
-  не тронуты — старый функционал кнопок/настроек работает как прежде
-- Удалён мёртвый файл `frontend/_mockup_autopilot.html`
+**Запрос:** убрать «тупые» текстовые подписи; вместо текста — рандомные смайлы
+(сердечки и т.п.) + рандомные хэштеги; иногда призыв «подпишись/лайк/поделись».
+Лимиты 3/1/2/1 — это дефолты, меняются в настройках.
 
-**Полный набор тестов: 130 passed** (`pytest tests/ -q --ignore=tests/test_playwright_ui.py`),
-проверено в браузере (Playwright): idle-состояние и симулированные
-динамические прогресс-бары (35%/100%/30%) — рендерятся корректно, 0 ошибок
-в консоли. Финальный code-review: APPROVED WITH MINOR NOTES (0
-critical/high).
+**Реализация** (`services/content_library.py`): новый **emoji_mode** (дефолт
+True, в `_default_lib`/`_normalize_library` — применяется и к существующим
+библиотекам без ключа). В `compose_caption_with_meta` при emoji_mode:
+- подпись = `random_emojis()` (1–3 смайла из `EMOJI_POOL`) + хэштеги;
+- призыв `random_subscribe_cta()` из `SUBSCRIBE_CTAS` добавляется при
+  `cta_enabled` с шансом `SUBSCRIBE_CTA_CHANCE` (0.35);
+- хэштеги выбираются рандомно (`random.shuffle(manual_tags)`), пайплайн
+  dedupe→forbidden→diversify не тронут (потолок `MAX_HASHTAGS`=3);
+- `meta={}` — семейства подписей (question/mission/...) в этом режиме не
+  обучаются (текстовые шаблоны не используются). Текстовый путь остался для
+  `emoji_mode=False`.
 
-**Следующий шаг:**
-- Понаблюдать за реальной работой прогресс-баров на проде (когда автопилот
-  скачивает/публикует) — динамика проверена только через мок `api()`, не
-  на живых данных VK
-- `main` сейчас на 24 коммита впереди `origin/main` — пуш на GitHub не
-  делался в этой сессии
+Применяется ко ВСЕМ типам (посты/фото/видео/клипы), т.к. все идут через
+`compose_caption_with_meta`. У p1 было `enabled/cta_enabled=True` — теперь
+вместо текстов идут смайлы + хэштеги + иногда призыв подписаться.
+
+**Тесты: 157 passed.** Новое: emoji-режим в `tests/test_content_library.py`;
+legacy текстовый путь в `test_content_library.py`/`test_caption_learning.py`
+помечен `emoji_mode=False`.
+
+## Checkpoint (2026-06-16 13:56)
+
+**Запрос:** клипы/видео/фото спамятся без отложки; на клипах/видео чужой текст;
+тише звук; убрать жёсткий кроп и фейд; маленькие стартовые лимиты (3 поста /
+1 фото / 2 клипа / 1 видео) с разносом по суткам (день+ночь); больше
+статистики, чтобы понимать когда постить больше/меньше (только статистика,
+лимиты вручную — выбор пользователя).
+
+1. **Фото-спам — баг исправлен** (`workers/photos.py`): `publish_photos_worker`
+   резервировал слот через `reserve_slot` только для ПЕРВОГО фото, дальше время
+   накручивалось вручную (`next_ts += random`) в обход дневного лимита и реестра
+   слотов → пачка фото за один день. Теперь `reserve_slot('photos', ...)` на
+   КАЖДОЕ фото (как у видео/клипов). Убран мёртвый импорт
+   `read_last_scheduled/write_last_scheduled`.
+2. **Фото — свой дневной лимит** (`services/slot_scheduler.py`): раньше фото
+   делили `max_posts_per_day` с постами. Добавлен `photos_settings.daily_limit`
+   (дефолт 1, `_DEFAULT_PHOTOS_DAILY_LIMIT`). Посты остаются на
+   `max_posts_per_day`. Итог: посты 3 / фото 1 / клипы 2 / видео 1.
+3. **Объём за прогон = дневному лимиту** (config, все 3 профиля):
+   `photos_publish_per_run`→1, `videos_publish_per_run`→1, `clips_publish_per_run`→2
+   + `photos_settings.daily_limit`=1. Меньше заливается за прогон — нет пачки
+   медиа в группе сразу (клипы остаются `is_reels=1` по выбору пользователя).
+4. **Свой текст на клипах/видео** (`workers/videos.py`): `_upload_video`
+   получал `title`/`description` ИСХОДНИКА — на клипе оставался чужой текст.
+   Теперь подпись `compose_caption_with_meta` готовится ДО заливки и идёт и в
+   `description` видео/клипа, и в запись на стене; title = первая строка нашей
+   подписи (fallback «Клип»/«Видео»).
+5. **Тише звук** (`services/video_transform.py`): `transform_video` принимает
+   `volume_factor` (дефолт из `video_transform.volume_factor`, **0.7 = −30%**),
+   добавляет `volume=` в аудио-цепочку. Применяется к видео и клипам.
+6. **Убран кроп краёв и фейды** (`services/video_transform.py`): `crop_percent`
+   жёстко 0 (раньше config 0.0 = «авто/рандом» 0.3–1% — грабля!), `do_fade`
+   всегда False, из ротации формата убран `square_crop` (резал контент);
+   остались `original`/`square_blur` (плашки, без обрезки), клипы — `vertical_blur`.
+7. **Статистика по типам медиа** (`services/tracker.py`): `get_reach_trend`
+   принимает `media_type`; новый `get_reach_trend_by_type` — тренд охвата по
+   posts/photo/video/clip + рекомендация объёма (`reduce`/`hold`/`increase`/
+   `insufficient`) на основе общего тренда. Выведено в `GET /growth/weekly_report`
+   (`reach_trend_by_type`). Лимиты НЕ меняются автоматически — подсказка для
+   ручной настройки.
+
+**Сутки 24ч:** `publish_hours_enabled=false`, `apply_window_to_media=false` —
+окно не режет, медиа разносятся по суткам через delays + `min_gap`.
+
+**Тесты: 153 passed** (`pytest tests/ -q --ignore=tests/test_playwright_ui.py`).
+Новое/обновлено: `tests/test_slot_scheduler.py` (лимит фото), `tests/test_tracker_reach.py`
+(тренд по типам), `tests/test_video_transform.py` (crop=0, fade off, volume).
+
+**Грабля:** config.json редактировался вручную — делать при **остановленном**
+боте (грабля #5), иначе UI-сохранение перезапишет.
 
 ---
 
-## Checkpoint (2026-06-14 11:45) — предыдущий
-
-**Slot scheduler + media quality (план `docs/superpowers/plans/2026-06-13-slot-scheduler-and-media-quality.md`, 16/16 задач):**
-- `services/slot_scheduler.py`: единый резерв слотов публикации для постов/
-  фото/видео/клипов — `reserve_slot()`/`record_slot()`, `min_gap` между
-  любыми типами, дневные лимиты видео/клипов настраиваются через
-  `videos_settings.daily_limit` / `clips_settings.daily_limit` в config.json
-  (дефолты 1 и 2). Хранится в `app_state.scheduled_slots_file`. Подключён во
-  все 3 publish-воркера — больше нет коллизий слотов и спама постов с
-  интервалом 10-30 мин
-- pHash-дедуп (`services/phash.py`) включён для фото (был выключен по
-  умолчанию) и расширен на видео/клипы (хэш кадров)
-- Engagement-фильтр отключён хардкодом в коде (не в config.json) — забираются
-  все посты источника, а не только "лучшие"
-- `services/publish_log.py`: структурированный JSONL-лог каждой попытки
-  публикации (`success|failed|duplicate|skipped`) в
-  `storage/{profile}/publish_log.jsonl`, авторотация в `.gz` раз в сутки —
-  вызывается из `media_loop_worker` на каждом проходе
-- Видео-антиплагиат смягчён: crop 1-3% (было 4-8%), fade-вероятность 20%
-  (было 50%), рамка 10% (было 30%), aspect_mode веса смещены к `original`
-  (0.65/0.25/0.10) — меньше потери качества
-- Фото-кроп по умолчанию 1-2.5% (было 2-5%) — `apply_random_crop`
-
-**Полный набор тестов: 126 passed** (`pytest tests/ -q --ignore=tests/test_playwright_ui.py`)
-
-**Следующий шаг:**
-- Понаблюдать неделю за `publish_log.jsonl` — убедиться что слоты не
-  коллизят и дневные лимиты видео/клипов соблюдаются
-- Создать скилл `.claude/commands/` для авто-коммитов и авто-деплоя
-  (запрошено пользователем, не сделано в этой сессии)
-
-**Блокеры:**
-- tests/test_playwright_ui.py: 2 теста падали и до изменений (среда)
+> Более ранние чекпоинты (2026-06-14 и старше) — в `docs/CHANGELOG.md`.
+> Каждую сессию не нужны, поднимать по запросу.

@@ -133,9 +133,8 @@ def test_transform_missing_file_returns_false(tmp_path):
     assert transform_video(tmp_path / 'nope.mp4', {'crop_percent': 0.05}) is False
 
 
-def test_auto_crop_percent_range_is_softer(monkeypatch, tmp_path):
-    """User feedback: crop was too aggressive and degraded quality —
-    reduce the auto-random crop range from 4-8% to 1-3%."""
+def test_crop_disabled_no_edge_crop(monkeypatch, tmp_path):
+    """User feedback: убрать жёсткий кроп краёв — crop_percent всегда 0."""
     import random
     from services import video_transform
 
@@ -160,12 +159,11 @@ def test_auto_crop_percent_range_is_softer(monkeypatch, tmp_path):
     random.seed(1)
     for _ in range(50):
         video_transform.transform_from_profile(src, profile, is_clip=False)
-        assert 0.01 <= captured['crop_percent'] <= 0.03
+        assert captured['crop_percent'] == 0.0
 
 
-def test_fade_probability_reduced(monkeypatch, tmp_path):
-    """User feedback: fade was too aggressive (appeared too often).
-    Reduce random fade probability from 50% to 20%."""
+def test_fade_disabled(monkeypatch, tmp_path):
+    """User feedback: убрать фейды полностью — fade всегда False."""
     import random
     from services import video_transform
 
@@ -194,5 +192,57 @@ def test_fade_probability_reduced(monkeypatch, tmp_path):
     for _ in range(200):
         video_transform.transform_from_profile(src, profile, is_clip=False)
 
-    fade_rate = sum(captured_fades) / len(captured_fades)
-    assert fade_rate < 0.3, f"fade rate {fade_rate} too high, expected ~0.2"
+    assert not any(captured_fades), "фейды должны быть отключены полностью"
+
+
+def test_volume_factor_quietens_audio(monkeypatch, tmp_path):
+    """Звук клипов/видео тише оригинала: в аудио-цепочку попадает volume=."""
+    from services import video_transform
+
+    src = tmp_path / 'v.mp4'
+    src.write_bytes(b'fake')
+
+    monkeypatch.setattr(video_transform, 'ffmpeg_available', lambda: True)
+    monkeypatch.setattr(video_transform, '_probe_duration', lambda p: 0.0)
+
+    captured = {}
+
+    class _Result:
+        returncode = 1
+        stderr = b''
+
+    def fake_run(cmd, **kwargs):
+        captured['cmd'] = cmd
+        return _Result()
+
+    monkeypatch.setattr(video_transform.subprocess, 'run', fake_run)
+
+    video_transform.transform_video(src, {}, volume_factor=0.7)
+    filter_complex = captured['cmd'][captured['cmd'].index('-filter_complex') + 1]
+    assert 'volume=0.700' in filter_complex
+
+
+def test_volume_factor_default_no_change(monkeypatch, tmp_path):
+    from services import video_transform
+
+    src = tmp_path / 'v.mp4'
+    src.write_bytes(b'fake')
+
+    monkeypatch.setattr(video_transform, 'ffmpeg_available', lambda: True)
+    monkeypatch.setattr(video_transform, '_probe_duration', lambda p: 0.0)
+
+    captured = {}
+
+    class _Result:
+        returncode = 1
+        stderr = b''
+
+    def fake_run(cmd, **kwargs):
+        captured['cmd'] = cmd
+        return _Result()
+
+    monkeypatch.setattr(video_transform.subprocess, 'run', fake_run)
+
+    video_transform.transform_video(src, {})
+    filter_complex = captured['cmd'][captured['cmd'].index('-filter_complex') + 1]
+    assert 'volume=' not in filter_complex

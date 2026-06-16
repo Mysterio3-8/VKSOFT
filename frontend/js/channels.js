@@ -16,7 +16,6 @@ function renderProfiles() {
             <input class="form-input" id="profileName_${escAttr(profile.id)}" value="${escAttr(profile.name || '')}" placeholder="Название">
             <input class="form-input" id="profileGroup_${escAttr(profile.id)}" value="${escAttr(gid)}" placeholder="ID канала">
           </div>
-          <div class="channel-meta">Очередь: ${profile.pending || 0}</div>
         </div>
         <div class="channel-actions">
           <button class="btn btn-secondary btn-sm" onclick="switchProfile('${escAttr(profile.id)}')">Выбрать</button>

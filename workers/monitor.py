@@ -418,42 +418,21 @@ def random_delay(min_s: float, max_s: float):
 
 
 def monitor_worker():
-    """Главный цикл мониторинга — работает в фоне."""
+    """Одна проверка источников → стоп. Работает в фоне (daemon-поток).
+
+    Повторов по интервалу нет: бот запускают на короткое время, одной
+    проверки достаточно, чтобы закинуть свежие посты в отложку VK.
+    """
     app_state.is_monitoring = True
-    app_state.add_monitor_log('🔭 Мониторинг запущен', 'info')
+    app_state.add_monitor_log('🔭 Мониторинг запущен (один проход)', 'info')
 
     try:
-        while app_state.is_monitoring:
-            now = datetime.now()
-            app_state.monitor_last_check = now.strftime('%d.%m.%Y %H:%M')
-            app_state.add_monitor_log(f'Начало цикла: {app_state.monitor_last_check}')
-
-            try:
-                _monitor_cycle()
-            except Exception as e:
-                app_state.add_monitor_log(f'Ошибка цикла: {e}', 'error')
-
-            if not app_state.is_monitoring:
-                break
-
-            # Расчёт следующей проверки
-            interval_min = int(
-                app_state.profile.get('monitoring', {}).get('check_interval_min', 120)
-            )
-            from datetime import timedelta
-            next_dt = datetime.now() + timedelta(minutes=interval_min)
-            app_state.monitor_next_check = next_dt.strftime('%d.%m.%Y %H:%M')
-            app_state.add_monitor_log(
-                f'Следующая проверка: {app_state.monitor_next_check} (через {interval_min} мин)'
-            )
-
-            # Ждём до следующего цикла, но проверяем флаг каждые 30 сек
-            wait_total = interval_min * 60
-            slept = 0
-            while slept < wait_total and app_state.is_monitoring:
-                time.sleep(30)
-                slept += 30
-
+        app_state.monitor_last_check = datetime.now().strftime('%d.%m.%Y %H:%M')
+        app_state.add_monitor_log(f'Начало проверки: {app_state.monitor_last_check}')
+        try:
+            _monitor_cycle()
+        except Exception as e:
+            app_state.add_monitor_log(f'Ошибка цикла: {e}', 'error')
     except Exception as e:
         app_state.add_monitor_log(f'Критическая ошибка: {e}', 'error')
     finally:

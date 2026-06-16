@@ -78,7 +78,13 @@ async def weekly_report():
     try:
         from services.content_library import load_library
         from services.source_quality import load_states
-        from services.tracker import get_caption_stats, get_overlay_stats, get_scored_posts
+        from services.tracker import (
+            get_caption_stats,
+            get_overlay_stats,
+            get_reach_trend,
+            get_reach_trend_by_type,
+            get_scored_posts,
+        )
 
         week_ago = int(time.time()) - 7 * 86400
         scored = get_scored_posts()
@@ -95,6 +101,8 @@ async def weekly_report():
             },
             'overlay_stats': get_overlay_stats(),
             'category_weights': load_library().get('category_weights', {}),
+            'reach_trend': get_reach_trend(),
+            'reach_trend_by_type': get_reach_trend_by_type(),
             'sources': load_states(),
         }
     except Exception as e:
